@@ -1,14 +1,29 @@
 "use client";
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { Dropzone } from "@/components/dropzone";
 import { MaterialForm, type Hints } from "@/components/material-form";
-import { PartViewer } from "@/components/part-viewer";
 import { PartsList } from "@/components/parts-list";
 import { DownloadButton } from "@/components/download-button";
 import { fileToCompressedBase64 } from "@/lib/image-utils";
 import type { Drawing } from "@/lib/part-spec";
 import type { Mesh } from "@/lib/occ/mesh-from-shape";
 import { getOccWorker } from "@/lib/occ/client";
+
+// Isolate the 3D viewer + r3f/drei/three imports behind a client-only
+// dynamic boundary so any load-time failure in those packages does not
+// crash the whole page on first render.
+const PartViewer = dynamic(
+  () => import("@/components/part-viewer").then((m) => m.PartViewer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-sm text-bodor-muted">
+        Cargando visor 3D…
+      </div>
+    ),
+  },
+);
 
 type Stage = "idle" | "analyzing" | "building" | "ready" | "error";
 
