@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import * as Comlink from "comlink";
 import { Dropzone } from "@/components/dropzone";
@@ -40,6 +40,8 @@ type PartResult = {
 
 type Phase = "idle" | "working" | "ready" | "error";
 type EngineStatus = "pending" | "loading" | "ready";
+
+type EngineBytes = { loaded: number; total: number; files: number };
 
 type Progress = {
   steps: Record<StepId, StepInfo>;
@@ -97,6 +99,7 @@ function updateStep(
 export default function SketchToStep() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [engine, setEngine] = useState<EngineStatus>("pending");
+  const [engineBytes, setEngineBytes] = useState<EngineBytes | null>(null);
   const [hints, setHints] = useState<Hints>({
     default_material: "acero_carbono",
     default_thickness_mm: 10,
@@ -106,20 +109,35 @@ export default function SketchToStep() {
   const [results, setResults] = useState<Record<number, PartResult>>({});
   const [progress, setProgress] = useState<Progress>(INITIAL_PROGRESS);
 
-  // Kick off the OCC WASM download the moment the page is on screen.
-  // By the time the user has picked a file and Claude has returned a
-  // PartSpec, the ~15 MB kernel is usually already instantiated.
+  // Keep a ref to the latest engineBytes so the buildPart flow can also
+  // display byte-level progress if the preload didn't finish in time.
+  const engineBytesRef = useRef<EngineBytes | null>(null);
+  engineBytesRef.current = engineBytes;
+
+  // Preload OCC WASM on mount with byte-level progress reporting.
   useEffect(() => {
     let cancelled = false;
     setEngine("loading");
     (async () => {
       try {
         const worker = getOccWorker();
-        await worker.preload();
-        if (!cancelled) setEngine("ready");
+        const onProg = (evt: WorkerProgress) => {
+          if (cancelled) return;
+          if (evt.kind === "engine_progress") {
+            setEngineBytes({
+              loaded: evt.loaded,
+              total: evt.total,
+              files: evt.files,
+            });
+          }
+        };
+        await worker.preload(Comlink.proxy(onProg));
+        if (!cancelled) {
+          setEngine("ready");
+        }
       } catch {
-        // Swallow: a real user action will surface the error via
-        // the normal error path.
+        // Swallow: a real user action will surface the error via the
+        // normal error path.
       }
     })();
     return () => {
@@ -127,10 +145,43 @@ export default function SketchToStep() {
     };
   }, []);
 
-  const stepsArray: StepInfo[] = useMemo(
-    () => progress.order.map((id) => progress.steps[id]),
-    [progress],
-  );
+  const stepsArray: StepInfo[] = useMemo(() => {
+    const arr = progress.order.map((id) => ({ ...progress.steps[id] }));
+    // Attach live engine bytes to the active engine row.
+    const engineRow = arr.find((s) => s.id === "engine");
+    if (
+      engineRow &&
+      engineRow.state === "active" &&
+      engineBytes &&
+      engineBytes.total > 0
+    ) {
+      engineRow.progress = {
+        loaded: engineBytes.loaded,
+        total: engineBytes.total,
+      };
+      engineRow.note = `${engineBytes.files} módulos WASM`;
+    }
+    return arr;
+  }, [progress, engineBytes]);
+
+  const preloadStep: StepInfo = useMemo(() => {
+    const s: StepInfo = {
+      id: "engine",
+      label: "Motor CAD",
+      state: engine === "ready" ? "done" : "active",
+      estimateRangeSec: [5, 20],
+      note:
+        engine === "ready"
+          ? "Listo"
+          : engineBytes
+            ? `${engineBytes.files} módulos WASM`
+            : "Descargando…",
+    };
+    if (engine !== "ready" && engineBytes && engineBytes.total > 0) {
+      s.progress = { loaded: engineBytes.loaded, total: engineBytes.total };
+    }
+    return s;
+  }, [engine, engineBytes]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -138,7 +189,6 @@ export default function SketchToStep() {
       setDrawing(null);
       setResults({});
       setSelected(0);
-      // If the engine is already warm, pre-mark the engine row as done.
       setProgress(() => {
         const base = INITIAL_PROGRESS;
         if (engine === "ready") {
@@ -203,16 +253,20 @@ export default function SketchToStep() {
         const worker = getOccWorker();
         const next: Record<number, PartResult> = {};
         let engineStart: number | null = null;
-        let buildStart: number | null = null;
-        let stepStart: number | null = null;
         let buildTotalMs = 0;
-        let stepTotalMs = 0;
 
         const onProgress = (evt: WorkerProgress) => {
           switch (evt.kind) {
             case "loading_engine":
               engineStart = Date.now();
               markActive("engine");
+              break;
+            case "engine_progress":
+              setEngineBytes({
+                loaded: evt.loaded,
+                total: evt.total,
+                files: evt.files,
+              });
               break;
             case "engine_ready":
               if (engineStart !== null) {
@@ -223,7 +277,6 @@ export default function SketchToStep() {
               setEngine("ready");
               break;
             case "building_part":
-              if (buildStart === null) buildStart = Date.now();
               markActive(
                 "build",
                 `Pieza ${evt.partIndex + 1} de ${evt.totalParts}`,
@@ -237,7 +290,6 @@ export default function SketchToStep() {
               );
               break;
             case "writing_step":
-              if (stepStart === null) stepStart = Date.now();
               markActive("step", `Pieza ${evt.partIndex + 1}`);
               break;
           }
@@ -257,7 +309,7 @@ export default function SketchToStep() {
           buildTotalMs += Date.now() - partT;
         }
         markDone("build", buildTotalMs);
-        markDone("step", stepTotalMs || Math.max(1, buildTotalMs * 0.05));
+        markDone("step", Math.max(1, buildTotalMs * 0.05));
         setPhase("ready");
       } catch (e) {
         const msg = (e as Error).message;
@@ -298,6 +350,19 @@ export default function SketchToStep() {
         <aside className="flex flex-col gap-4">
           <Dropzone onFile={handleFile} disabled={isWorking} />
           <MaterialForm value={hints} onChange={setHints} />
+
+          {!isWorking && phase !== "ready" && phase !== "error" && (
+            <div className="rounded-lg border border-bodor-line bg-bodor-panel/60 p-3">
+              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-bodor-muted">
+                Motor CAD (precarga)
+              </h2>
+              <ProgressStepper steps={[preloadStep]} />
+              <p className="mt-2 text-[10px] text-bodor-muted">
+                Se descarga ~15 MB de WebAssembly la primera vez. Después queda
+                cacheado y este paso es instantáneo.
+              </p>
+            </div>
+          )}
 
           {(isWorking || phase === "ready" || phase === "error") && (
             <div className="rounded-lg border border-bodor-line bg-bodor-panel/60 p-3">
