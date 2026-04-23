@@ -6,17 +6,43 @@ import { buildPart } from "./build";
 import { meshFromShape, type Mesh } from "./mesh-from-shape";
 import { writeStep } from "./write-step";
 
+export type WorkerProgress =
+  | { kind: "loading_engine" }
+  | { kind: "engine_ready" }
+  | { kind: "building_part"; partIndex: number; totalParts: number }
+  | { kind: "tessellating"; partIndex: number }
+  | { kind: "writing_step"; partIndex: number };
+
 export type BuildPartResponse = {
   mesh: Mesh;
   stepContent: string;
   watertight: boolean;
 };
 
+export type ProgressCallback = (event: WorkerProgress) => void;
+
+let engineLoaded = false;
+
 const api = {
-  async buildPart(spec: PartSpec): Promise<BuildPartResponse> {
+  async buildPart(
+    spec: PartSpec,
+    partIndex: number,
+    totalParts: number,
+    onProgress: ProgressCallback,
+  ): Promise<BuildPartResponse> {
+    if (!engineLoaded) {
+      onProgress({ kind: "loading_engine" });
+    }
     const oc = await loadOC();
+    if (!engineLoaded) {
+      engineLoaded = true;
+      onProgress({ kind: "engine_ready" });
+    }
+    onProgress({ kind: "building_part", partIndex, totalParts });
     const { shape, watertight } = buildPart(oc, spec);
+    onProgress({ kind: "tessellating", partIndex });
     const mesh = meshFromShape(oc, shape);
+    onProgress({ kind: "writing_step", partIndex });
     const stepContent = writeStep(oc, shape);
     return { mesh, stepContent, watertight };
   },

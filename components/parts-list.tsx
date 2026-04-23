@@ -9,22 +9,30 @@ type Props = {
 
 export function PartsList({ drawing, selected, onSelect }: Props) {
   return (
-    <div className="flex flex-col divide-y divide-bodor-line rounded border border-bodor-line">
+    <div
+      className="flex flex-col divide-y divide-bodor-line overflow-hidden rounded border border-bodor-line"
+      role="listbox"
+      aria-label="Piezas detectadas"
+    >
       {drawing.parts.map((p, i) => (
         <button
           key={i}
           type="button"
+          role="option"
+          aria-selected={selected === i}
           onClick={() => onSelect(i)}
-          className={`flex flex-col gap-0.5 px-3 py-2 text-left text-xs transition-colors ${
+          className={`flex min-h-[64px] flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors ${
             selected === i
               ? "bg-bodor-accent/10 text-bodor-text"
-              : "hover:bg-bodor-panel"
+              : "hover:bg-bodor-panel active:bg-bodor-panel"
           }`}
         >
-          <span className="font-semibold">{displayName(p, i)}</span>
-          <span className="text-bodor-muted">{describeProfile(p)}</span>
-          <span className="text-bodor-muted">
-            {p.quantity} uds · {p.material}
+          <span className="text-xs font-semibold">{displayName(p, i)}</span>
+          <span className="text-[11px] text-bodor-muted">
+            {describeProfile(p)}
+          </span>
+          <span className="text-[11px] text-bodor-muted">
+            {p.quantity} uds · {p.material.replace("_", " ")}
           </span>
         </button>
       ))}

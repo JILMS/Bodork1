@@ -23,7 +23,7 @@ export function DownloadButton({ stepContent, filename, disabled }: Props) {
       type="button"
       onClick={handle}
       disabled={!stepContent || disabled}
-      className="rounded bg-bodor-accent px-4 py-2 text-sm font-semibold text-bodor-bg transition-colors hover:bg-bodor-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+      className="h-11 w-full rounded bg-bodor-accent px-4 text-sm font-semibold text-bodor-bg transition-colors hover:bg-bodor-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
     >
       Descargar .STEP
     </button>

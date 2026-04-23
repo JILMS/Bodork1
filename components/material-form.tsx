@@ -24,7 +24,7 @@ export function MaterialForm({ value, onChange }: Props) {
               default_material: e.target.value as Material,
             })
           }
-          className="rounded border border-bodor-line bg-bodor-panel px-2 py-1.5 text-sm"
+          className="h-10 rounded border border-bodor-line bg-bodor-panel px-2 text-sm"
         >
           <option value="acero_carbono">Acero carbono</option>
           <option value="acero_inox">Acero inox</option>
@@ -36,6 +36,7 @@ export function MaterialForm({ value, onChange }: Props) {
         <span className="text-bodor-muted">Espesor por defecto (mm)</span>
         <input
           type="number"
+          inputMode="decimal"
           min={0.5}
           step={0.5}
           value={value.default_thickness_mm}
@@ -45,7 +46,7 @@ export function MaterialForm({ value, onChange }: Props) {
               default_thickness_mm: parseFloat(e.target.value) || 0,
             })
           }
-          className="rounded border border-bodor-line bg-bodor-panel px-2 py-1.5 text-sm"
+          className="h-10 rounded border border-bodor-line bg-bodor-panel px-2 text-sm"
         />
       </label>
     </div>
