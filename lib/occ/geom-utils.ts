@@ -17,9 +17,11 @@ export function makeCylinder(
 }
 
 // Subtracts `tool` from `base` (boolean cut). Returns the resulting shape.
+// The _3 suffix is opencascade.js's overload index (1 + arity), so
+// `Cut_3(shape, shape)` is the 2-arg constructor in OCCT.
 export function cut(oc: OC, base: ShapeHandle, tool: ShapeHandle): ShapeHandle {
-  const op = new oc.BRepAlgoAPI_Cut_3(base, tool, new oc.Message_ProgressRange_1());
-  op.Build(new oc.Message_ProgressRange_1());
+  const op = new oc.BRepAlgoAPI_Cut_3(base, tool);
+  op.Build();
   return op.Shape();
 }
 
@@ -63,7 +65,7 @@ export function makeBox(
 // Returns true if the shape passes OpenCascade's B-Rep validity checks,
 // which is a proxy for "watertight solid" good enough for STEP export.
 export function isSolidValid(oc: OC, shape: ShapeHandle): boolean {
-  const analyzer = new oc.BRepCheck_Analyzer(shape, true, false, false);
+  const analyzer = new oc.BRepCheck_Analyzer(shape, true);
   return analyzer.IsValid_2();
 }
 

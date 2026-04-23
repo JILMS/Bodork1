@@ -75,7 +75,7 @@ function makeCone(
 }
 
 function fuse(oc: OC, a: ShapeHandle, b: ShapeHandle): ShapeHandle {
-  const op = new oc.BRepAlgoAPI_Fuse_3(a, b, new oc.Message_ProgressRange_1());
-  op.Build(new oc.Message_ProgressRange_1());
+  const op = new oc.BRepAlgoAPI_Fuse_3(a, b);
+  op.Build();
   return op.Shape();
 }

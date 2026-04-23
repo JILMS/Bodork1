@@ -2,45 +2,39 @@ import type { OC } from "./types";
 
 let cached: Promise<OC> | null = null;
 
-// opencascade.js 2.x uses a custom-build loader: the main emscripten
-// factory and each TK* library are shipped as separate .wasm assets
-// whose URLs are produced by webpack (asset/resource). We pass the
-// minimum subset our geometry + STEP-writer code touches so the browser
-// downloads as little WASM as possible on first visit.
+// opencascade.js 2.x ships pre-assembled "mega-bundles" meant to be
+// passed to initOpenCascade via `libs`. Individual TK* modules exist
+// only for custom builds and have fragile ordering/dependency issues
+// when passed directly (e.g. TKernel isn't even an export — that bug
+// is what kept the engine from ever booting).
 //
-// Kept: B-Rep kernel, primitives, booleans, tessellation, STEP AP214 writer.
-// Dropped (vs the default "all TK modules" bundle):
-//   - TKShHealing, TKFillet, TKOffset — no healing / fillet / offset ops
-//   - TKSTEP209 — we emit AP214 (write.step.schema = 3)
+// We load three bundles:
+//   - ocCore (~17 MB raw / 3.8 MB gzip): kernel + geometry primitives.
+//   - ocModelingAlgorithms (~34 MB / 6.7 MB gzip): BRep, Prim, Bool,
+//     Mesh — everything our builders call.
+//   - ocDataExchangeBase (~21 MB / 2.8 MB gzip): STEP reader + writer.
+//
+// We intentionally skip ocVisualApplication (three.js renders the mesh
+// client-side) and ocDataExchangeExtra (no IGES / STL export).
 export function loadOC(): Promise<OC> {
   if (!cached) {
     cached = (async () => {
       const mod = await import("opencascade.js");
       const init = mod.initOpenCascade as (opts: {
-        mainJS?: unknown;
-        mainWasm?: string;
         libs?: string[];
       }) => Promise<OC>;
       return init({
-        mainJS: mod.main,
-        mainWasm: mod.mainWasm,
+        // README-recommended full bundle set. STEPControl_Writer lives
+        // in the dataExchangeExtra bundle, which in turn depends on
+        // CAF / LCAF symbols from visualApplication — without that
+        // bundle the dynamic linker hangs. Total ~100 MB uncompressed,
+        // ~20 MB gzip, cached forever on first load.
         libs: [
-          mod.TKernel,
-          mod.TKMath,
-          mod.TKG2d,
-          mod.TKG3d,
-          mod.TKGeomBase,
-          mod.TKBRep,
-          mod.TKGeomAlgo,
-          mod.TKTopAlgo,
-          mod.TKPrim,
-          mod.TKBO,
-          mod.TKBool,
-          mod.TKMesh,
-          mod.TKXSBase,
-          mod.TKSTEPBase,
-          mod.TKSTEPAttr,
-          mod.TKSTEP,
+          mod.ocCore,
+          mod.ocModelingAlgorithms,
+          mod.ocVisualApplication,
+          mod.ocDataExchangeBase,
+          mod.ocDataExchangeExtra,
         ],
       });
     })();
