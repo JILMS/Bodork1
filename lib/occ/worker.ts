@@ -24,6 +24,19 @@ export type ProgressCallback = (event: WorkerProgress) => void;
 let engineLoaded = false;
 
 const api = {
+  // Called fire-and-forget on page mount so the ~15 MB OpenCascade WASM
+  // download starts in parallel with the user picking a file and the
+  // Claude vision call.
+  async preload(): Promise<void> {
+    if (engineLoaded) return;
+    await loadOC();
+    engineLoaded = true;
+  },
+
+  isEngineReady(): boolean {
+    return engineLoaded;
+  },
+
   async buildPart(
     spec: PartSpec,
     partIndex: number,

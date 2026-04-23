@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import * as Comlink from "comlink";
 import { Dropzone } from "@/components/dropzone";
@@ -11,7 +11,7 @@ import {
   type StepId,
   type StepInfo,
 } from "@/components/progress-stepper";
-import { fileToCompressedBase64 } from "@/lib/image-utils";
+import { fileToUploadPayload } from "@/lib/image-utils";
 import type { Drawing } from "@/lib/part-spec";
 import type { Mesh } from "@/lib/occ/mesh-from-shape";
 import { getOccWorker } from "@/lib/occ/client";
@@ -39,6 +39,7 @@ type PartResult = {
 };
 
 type Phase = "idle" | "working" | "ready" | "error";
+type EngineStatus = "pending" | "loading" | "ready";
 
 type Progress = {
   steps: Record<StepId, StepInfo>;
@@ -50,7 +51,7 @@ const INITIAL_PROGRESS: Progress = {
   steps: {
     compress: {
       id: "compress",
-      label: "Preparar imagen",
+      label: "Preparar archivo",
       state: "pending",
       estimateRangeSec: [0, 1],
     },
@@ -58,20 +59,20 @@ const INITIAL_PROGRESS: Progress = {
       id: "analyze",
       label: "Interpretar plano con IA",
       state: "pending",
-      estimateRangeSec: [4, 15],
+      estimateRangeSec: [2, 7],
     },
     engine: {
       id: "engine",
-      label: "Cargar motor CAD (opencascade)",
+      label: "Cargar motor CAD",
       state: "pending",
-      estimateRangeSec: [8, 25],
-      note: "Sólo la primera vez en tu navegador",
+      estimateRangeSec: [5, 20],
+      note: "Sólo la primera vez · se precarga en segundo plano",
     },
     build: {
       id: "build",
       label: "Construir sólido 3D",
       state: "pending",
-      estimateRangeSec: [1, 6],
+      estimateRangeSec: [1, 4],
     },
     step: {
       id: "step",
@@ -95,6 +96,7 @@ function updateStep(
 
 export default function SketchToStep() {
   const [phase, setPhase] = useState<Phase>("idle");
+  const [engine, setEngine] = useState<EngineStatus>("pending");
   const [hints, setHints] = useState<Hints>({
     default_material: "acero_carbono",
     default_thickness_mm: 10,
@@ -104,18 +106,50 @@ export default function SketchToStep() {
   const [results, setResults] = useState<Record<number, PartResult>>({});
   const [progress, setProgress] = useState<Progress>(INITIAL_PROGRESS);
 
+  // Kick off the OCC WASM download the moment the page is on screen.
+  // By the time the user has picked a file and Claude has returned a
+  // PartSpec, the ~15 MB kernel is usually already instantiated.
+  useEffect(() => {
+    let cancelled = false;
+    setEngine("loading");
+    (async () => {
+      try {
+        const worker = getOccWorker();
+        await worker.preload();
+        if (!cancelled) setEngine("ready");
+      } catch {
+        // Swallow: a real user action will surface the error via
+        // the normal error path.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const stepsArray: StepInfo[] = useMemo(
     () => progress.order.map((id) => progress.steps[id]),
     [progress],
   );
 
-  const handleImage = useCallback(
+  const handleFile = useCallback(
     async (file: File) => {
       setPhase("working");
       setDrawing(null);
       setResults({});
       setSelected(0);
-      setProgress(INITIAL_PROGRESS);
+      // If the engine is already warm, pre-mark the engine row as done.
+      setProgress(() => {
+        const base = INITIAL_PROGRESS;
+        if (engine === "ready") {
+          return updateStep(base, "engine", {
+            state: "done",
+            elapsedMs: 0,
+            note: "Ya estaba en caché",
+          });
+        }
+        return base;
+      });
 
       const markActive = (id: StepId, note?: string) =>
         setProgress((p) =>
@@ -129,17 +163,17 @@ export default function SketchToStep() {
             ...(note ? { note } : {}),
           }),
         );
-      const markError = (id: StepId, error: string) =>
-        setProgress((p) => updateStep(p, id, { state: "error", error }));
 
       try {
-        // 1. Compress client-side.
         const t0 = Date.now();
         markActive("compress");
-        const { base64, media_type } = await fileToCompressedBase64(file);
-        markDone("compress", Date.now() - t0);
+        const { base64, media_type, is_pdf } = await fileToUploadPayload(file);
+        markDone(
+          "compress",
+          Date.now() - t0,
+          is_pdf ? "PDF enviado directo" : undefined,
+        );
 
-        // 2. Analyze with Claude.
         const t1 = Date.now();
         markActive("analyze");
         const res = await fetch("/api/analyze", {
@@ -166,8 +200,6 @@ export default function SketchToStep() {
           `${d.parts.length} pieza${d.parts.length === 1 ? "" : "s"} detectada${d.parts.length === 1 ? "" : "s"}`,
         );
 
-        // 3 + 4 + 5. Build each part, tracking per-phase progress reported by
-        // the worker via a Comlink-proxied callback.
         const worker = getOccWorker();
         const next: Record<number, PartResult> = {};
         let engineStart: number | null = null;
@@ -188,6 +220,7 @@ export default function SketchToStep() {
               } else {
                 markDone("engine", 0, "Ya estaba en caché");
               }
+              setEngine("ready");
               break;
             case "building_part":
               if (buildStart === null) buildStart = Date.now();
@@ -211,9 +244,6 @@ export default function SketchToStep() {
         };
         const proxiedProgress = Comlink.proxy(onProgress);
 
-        // If the engine was already loaded in a previous run, the worker
-        // will skip "loading_engine" entirely. Pre-mark engine as done in
-        // that optimistic case after the first buildPart resolves.
         for (let i = 0; i < d.parts.length; i++) {
           const partT = Date.now();
           const out = await worker.buildPart(
@@ -224,22 +254,10 @@ export default function SketchToStep() {
           );
           next[i] = out as PartResult;
           setResults({ ...next });
-          const totalForPart = Date.now() - partT;
-          // writing_step inside worker is the tail of the part;
-          // we count build = total - (step phase ~100ms proxy).
-          buildTotalMs += totalForPart;
+          buildTotalMs += Date.now() - partT;
         }
         markDone("build", buildTotalMs);
-        if (progress.steps.engine.state !== "done") {
-          // Defensive: engine should be done by now.
-          setProgress((p) =>
-            p.steps.engine.state === "active"
-              ? updateStep(p, "engine", { state: "done" })
-              : p,
-          );
-        }
         markDone("step", stepTotalMs || Math.max(1, buildTotalMs * 0.05));
-
         setPhase("ready");
       } catch (e) {
         const msg = (e as Error).message;
@@ -251,7 +269,7 @@ export default function SketchToStep() {
         setPhase("error");
       }
     },
-    [hints, progress.steps.engine.state],
+    [engine, hints],
   );
 
   const currentResult = drawing ? results[selected] : undefined;
@@ -266,15 +284,19 @@ export default function SketchToStep() {
             Bodor Sketch → STEP
           </h1>
           <p className="text-[11px] text-bodor-muted sm:text-xs">
-            Foto del plano → sólido B-Rep estanco → archivo .STEP para la K1.
+            Foto o PDF del plano → sólido B-Rep estanco → archivo .STEP para la
+            K1.
           </p>
         </div>
-        <PhaseBadge phase={phase} />
+        <div className="flex items-center gap-3">
+          <EngineBadge status={engine} />
+          <PhaseBadge phase={phase} />
+        </div>
       </header>
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[340px_1fr]">
         <aside className="flex flex-col gap-4">
-          <Dropzone onImage={handleImage} disabled={isWorking} />
+          <Dropzone onFile={handleFile} disabled={isWorking} />
           <MaterialForm value={hints} onChange={setHints} />
 
           {(isWorking || phase === "ready" || phase === "error") && (
@@ -336,4 +358,30 @@ function PhaseBadge({ phase }: { phase: Phase }) {
   };
   const { text, cls } = map[phase];
   return <span className={`text-xs ${cls}`}>{text}</span>;
+}
+
+function EngineBadge({ status }: { status: EngineStatus }) {
+  if (status === "ready") {
+    return (
+      <span
+        className="flex items-center gap-1.5 text-[10px] text-emerald-400"
+        title="Motor CAD precargado"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        Motor CAD listo
+      </span>
+    );
+  }
+  if (status === "loading") {
+    return (
+      <span
+        className="flex items-center gap-1.5 text-[10px] text-bodor-muted"
+        title="Descargando el motor CAD (WASM) en segundo plano"
+      >
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-bodor-accent" />
+        Motor CAD cargando…
+      </span>
+    );
+  }
+  return null;
 }

@@ -9,9 +9,13 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+type ImageMediaType = "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+type DocumentMediaType = "application/pdf";
+type AnyMediaType = ImageMediaType | DocumentMediaType;
+
 type AnalyzeBody = {
   image_base64: string;
-  media_type: "image/jpeg" | "image/png" | "image/webp";
+  media_type: AnyMediaType;
   hints?: {
     default_material?: string;
     default_thickness_mm?: number;
@@ -47,8 +51,30 @@ export async function POST(req: NextRequest) {
     ? `Pistas del operario: material por defecto = ${body.hints.default_material ?? "acero_carbono"}, espesor por defecto si falta en plano = ${body.hints.default_thickness_mm ?? "no especificado"} mm.`
     : "Sin pistas adicionales.";
 
+  const isPdf = body.media_type === "application/pdf";
+
+  const inputBlock: Anthropic.Messages.ContentBlockParam = isPdf
+    ? {
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: body.image_base64,
+        },
+      }
+    : {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: body.media_type as ImageMediaType,
+          data: body.image_base64,
+        },
+      };
+
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-7",
+    // Sonnet 4.6: ~3-5x faster than Opus for vision on technical drawings,
+    // accuracy is plenty for shop sketches.
+    model: "claude-sonnet-4-6",
     max_tokens: 4096,
     system: [
       {
@@ -69,23 +95,14 @@ export async function POST(req: NextRequest) {
     messages: [
       {
         role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: body.media_type,
-              data: body.image_base64,
-            },
-          },
-          { type: "text", text: hintText },
-        ],
+        content: [inputBlock, { type: "text", text: hintText }],
       },
     ],
   });
 
   const toolUse = response.content.find(
-    (block): block is Anthropic.Messages.ToolUseBlock => block.type === "tool_use",
+    (block): block is Anthropic.Messages.ToolUseBlock =>
+      block.type === "tool_use",
   );
   if (!toolUse) {
     return NextResponse.json(
