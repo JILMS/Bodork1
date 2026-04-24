@@ -101,8 +101,10 @@ export default function SketchToStep() {
   const [engine, setEngine] = useState<EngineStatus>("pending");
   const [engineBytes, setEngineBytes] = useState<EngineBytes | null>(null);
   const [hints, setHints] = useState<Hints>({
-    default_material: "acero_carbono",
+    default_material: "hierro",
     default_thickness_mm: 10,
+    force_profile_kind: "auto",
+    force_corner_radius_mm: 0,
   });
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const [selected, setSelected] = useState(0);
@@ -235,6 +237,14 @@ export default function SketchToStep() {
             hints: {
               default_material: hints.default_material,
               default_thickness_mm: hints.default_thickness_mm,
+              force_profile_kind:
+                hints.force_profile_kind === "auto"
+                  ? undefined
+                  : hints.force_profile_kind,
+              force_corner_radius_mm:
+                hints.force_corner_radius_mm > 0
+                  ? hints.force_corner_radius_mm
+                  : undefined,
             },
           }),
         });
@@ -242,7 +252,8 @@ export default function SketchToStep() {
           const j = await res.json().catch(() => ({}));
           throw new Error(j.error ?? `Error ${res.status}`);
         }
-        const { drawing: d } = (await res.json()) as { drawing: Drawing };
+        const { drawing: raw } = (await res.json()) as { drawing: Drawing };
+        const d = applyClientHints(raw, hints);
         setDrawing(d);
         markDone(
           "analyze",
@@ -412,6 +423,33 @@ export default function SketchToStep() {
       </footer>
     </main>
   );
+}
+
+// Post-process the drawing returned by the model with the UI hints:
+// - If the user forced a corner radius, inject it into every tube that
+//   doesn't already have one.
+// - Material override: if the user picked a material explicitly via
+//   the form, use it when the model left the default in place.
+function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
+  return {
+    ...drawing,
+    parts: drawing.parts.map((p) => {
+      const pr = p.profile;
+      let profile = pr;
+      if (
+        hints.force_corner_radius_mm > 0 &&
+        (pr.kind === "square_tube" || pr.kind === "rectangular_tube") &&
+        (pr.corner_radius_mm === undefined || pr.corner_radius_mm === 0)
+      ) {
+        profile = { ...pr, corner_radius_mm: hints.force_corner_radius_mm };
+      }
+      const material =
+        p.material && p.material !== "acero_carbono"
+          ? p.material
+          : hints.default_material;
+      return { ...p, material, profile };
+    }),
+  };
 }
 
 function PhaseBadge({ phase }: { phase: Phase }) {

@@ -3,6 +3,7 @@ import type { OC, ShapeHandle } from "./types";
 import { buildFlatBar } from "./build-flat-bar";
 import { buildRoundTube } from "./build-round-tube";
 import { buildSquareTube } from "./build-square-tube";
+import { buildRectangularTube } from "./build-rectangular-tube";
 import { buildAngleProfile } from "./build-angle-profile";
 import { isSolidValid } from "./geom-utils";
 
@@ -24,6 +25,9 @@ export function buildPart(oc: OC, spec: PartSpec): BuildResult {
       break;
     case "square_tube":
       shape = buildSquareTube(oc, spec.profile);
+      break;
+    case "rectangular_tube":
+      shape = buildRectangularTube(oc, spec.profile);
       break;
     case "angle_profile":
       shape = buildAngleProfile(oc, spec.profile);

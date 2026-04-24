@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const MaterialZ = z.enum([
+  "hierro",
   "acero_carbono",
   "acero_inox",
   "aluminio",
@@ -47,8 +48,26 @@ export const SquareTubeZ = z.object({
   length_mm: z.number().positive(),
   side_mm: z.number().positive(),
   wall_thickness_mm: z.number().positive(),
+  corner_radius_mm: z.number().nonnegative().optional(),
   holes: z
     .array(HoleZ.extend({ face: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]) }))
+    .default([]),
+  ends: EndsZ,
+});
+
+export const RectangularTubeZ = z.object({
+  kind: z.literal("rectangular_tube"),
+  length_mm: z.number().positive(),
+  width_mm: z.number().positive(),
+  height_mm: z.number().positive(),
+  wall_thickness_mm: z.number().positive(),
+  corner_radius_mm: z.number().nonnegative().optional(),
+  holes: z
+    .array(
+      HoleZ.extend({
+        face: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+      }),
+    )
     .default([]),
   ends: EndsZ,
 });
@@ -69,6 +88,7 @@ export const ProfileZ = z.discriminatedUnion("kind", [
   FlatBarZ,
   RoundTubeZ,
   SquareTubeZ,
+  RectangularTubeZ,
   AngleProfileZ,
 ]);
 
@@ -90,6 +110,7 @@ export type EndCut = z.infer<typeof EndCutZ>;
 export type FlatBar = z.infer<typeof FlatBarZ>;
 export type RoundTube = z.infer<typeof RoundTubeZ>;
 export type SquareTube = z.infer<typeof SquareTubeZ>;
+export type RectangularTube = z.infer<typeof RectangularTubeZ>;
 export type AngleProfile = z.infer<typeof AngleProfileZ>;
 export type Profile = z.infer<typeof ProfileZ>;
 export type PartSpec = z.infer<typeof PartSpecZ>;
@@ -112,7 +133,13 @@ export const DRAWING_JSON_SCHEMA = {
           name: { type: "string" },
           material: {
             type: "string",
-            enum: ["acero_carbono", "acero_inox", "aluminio", "galvanizado"],
+            enum: [
+              "hierro",
+              "acero_carbono",
+              "acero_inox",
+              "aluminio",
+              "galvanizado",
+            ],
           },
           quantity: { type: "integer", minimum: 1 },
           notes: { type: "string" },
@@ -179,6 +206,39 @@ export const DRAWING_JSON_SCHEMA = {
                   length_mm: { type: "number" },
                   side_mm: { type: "number" },
                   wall_thickness_mm: { type: "number" },
+                  corner_radius_mm: { type: "number" },
+                  holes: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["diameter_mm", "position_mm", "face"],
+                      properties: {
+                        diameter_mm: { type: "number" },
+                        position_mm: { type: "number" },
+                        face: { enum: [1, 2, 3, 4] },
+                        type: { enum: ["through", "countersunk"] },
+                      },
+                    },
+                  },
+                  ends: endsSchema(),
+                },
+              },
+              {
+                type: "object",
+                required: [
+                  "kind",
+                  "length_mm",
+                  "width_mm",
+                  "height_mm",
+                  "wall_thickness_mm",
+                ],
+                properties: {
+                  kind: { const: "rectangular_tube" },
+                  length_mm: { type: "number" },
+                  width_mm: { type: "number" },
+                  height_mm: { type: "number" },
+                  wall_thickness_mm: { type: "number" },
+                  corner_radius_mm: { type: "number" },
                   holes: {
                     type: "array",
                     items: {

@@ -19,6 +19,8 @@ type AnalyzeBody = {
   hints?: {
     default_material?: string;
     default_thickness_mm?: number;
+    force_profile_kind?: string;
+    force_corner_radius_mm?: number;
   };
 };
 
@@ -47,8 +49,27 @@ export async function POST(req: NextRequest) {
 
   const anthropic = new Anthropic({ apiKey });
 
-  const hintText = body.hints
-    ? `Pistas del operario: material por defecto = ${body.hints.default_material ?? "acero_carbono"}, espesor por defecto si falta en plano = ${body.hints.default_thickness_mm ?? "no especificado"} mm.`
+  const hintParts: string[] = [];
+  if (body.hints?.default_material) {
+    hintParts.push(`material por defecto = ${body.hints.default_material}`);
+  }
+  if (body.hints?.default_thickness_mm) {
+    hintParts.push(
+      `espesor por defecto si falta en plano = ${body.hints.default_thickness_mm} mm`,
+    );
+  }
+  if (body.hints?.force_profile_kind) {
+    hintParts.push(
+      `FORZAR tipo de perfil = ${body.hints.force_profile_kind} (tiene prioridad sobre lo que sugiera el plano)`,
+    );
+  }
+  if (body.hints?.force_corner_radius_mm !== undefined) {
+    hintParts.push(
+      `radio de esquina para tubos = ${body.hints.force_corner_radius_mm} mm`,
+    );
+  }
+  const hintText = hintParts.length
+    ? `Pistas del operario: ${hintParts.join("; ")}.`
     : "Sin pistas adicionales.";
 
   const isPdf = body.media_type === "application/pdf";

@@ -52,7 +52,9 @@ function describeProfile(p: PartSpec): string {
     case "round_tube":
       return `Tubo Ø${pr.outer_diameter_mm}×${pr.wall_thickness_mm} × ${pr.length_mm} mm`;
     case "square_tube":
-      return `Tubo □${pr.side_mm}×${pr.wall_thickness_mm} × ${pr.length_mm} mm`;
+      return `Tubo □${pr.side_mm}×${pr.wall_thickness_mm}${pr.corner_radius_mm ? ` (R${pr.corner_radius_mm})` : ""} × ${pr.length_mm} mm`;
+    case "rectangular_tube":
+      return `Tubo ▭${pr.width_mm}×${pr.height_mm}×${pr.wall_thickness_mm}${pr.corner_radius_mm ? ` (R${pr.corner_radius_mm})` : ""} × ${pr.length_mm} mm`;
     case "angle_profile":
       return `Perfil L ${pr.leg_a_mm}×${pr.leg_b_mm}×${pr.thickness_mm} × ${pr.length_mm} mm`;
   }
