@@ -13,7 +13,7 @@ import {
   type StepInfo,
 } from "@/components/progress-stepper";
 import { fileToUploadPayload } from "@/lib/image-utils";
-import type { Drawing } from "@/lib/part-spec";
+import type { Drawing, PartSpec } from "@/lib/part-spec";
 import type { Mesh } from "@/lib/occ/mesh-from-shape";
 import { getOccWorker } from "@/lib/occ/client";
 import type { WorkerProgress } from "@/lib/occ/worker";
@@ -344,8 +344,12 @@ export default function SketchToStep() {
 
       for (let i = 0; i < drawing.parts.length; i++) {
         const partT = Date.now();
+        // Bodor K1 trick: pletinas (flat bars) are always sent to the
+        // machine as a fake angle profile (leg_b ≈ 1 mm) so the CAM
+        // accepts them. We do this transparently right before building.
+        const specForBuild = pletinaToFakeAngle(drawing.parts[i]);
         const out = await worker.buildPart(
-          drawing.parts[i],
+          specForBuild,
           i,
           drawing.parts.length,
           proxiedProgress,
@@ -474,11 +478,21 @@ export default function SketchToStep() {
           )}
 
           {drawing && (
-            <PartsList
-              drawing={drawing}
-              selected={selected}
-              onSelect={setSelected}
-            />
+            <>
+              <PartsList
+                drawing={drawing}
+                selected={selected}
+                onSelect={setSelected}
+              />
+              {drawing.parts.some((p) => p.profile.kind === "flat_bar") && (
+                <div className="rounded border border-bodor-accent/40 bg-bodor-accent/5 px-3 py-2 text-[11px] text-bodor-accent">
+                  Las pletinas se exportarán como falso ángulo en L
+                  (leg ≈ {FAKE_LEG_B_MM} mm) para que el CAM de la K1 las
+                  acepte. La cara con los agujeros será la del ala marcada
+                  en el plano. Cantidad enviada: 1.
+                </div>
+              )}
+            </>
           )}
 
           {showEditor && drawing && (
@@ -545,6 +559,50 @@ export default function SketchToStep() {
       />
     </main>
   );
+}
+
+// Bodor K1 trick: flat bars (pletinas) cannot be cut directly by the
+// machine, but the postprocessor accepts angle (L) profiles. Real
+// shop workflow is to send the pletina as an L with a tiny second leg
+// (≈1 mm) and one piece in the order; the machine then cuts the
+// outline of the flat face. We do the conversion silently right
+// before building so the UI keeps showing "Pletina" while the STEP
+// shipped to the machine is the L variant.
+const FAKE_LEG_B_MM = 1;
+
+function pletinaToFakeAngle(p: PartSpec): PartSpec {
+  if (p.profile.kind !== "flat_bar") return p;
+  const fb = p.profile;
+  const newHoles = fb.holes.map((h) => ({
+    diameter_mm: h.diameter_mm,
+    position_mm: h.position_mm,
+    // flat_bar edge_offset is from Y=0 (one edge); angle leg-a
+    // edge_offset is from Y=leg_a (outer edge). Flip so the hole
+    // ends up at the same physical Y in the L cross-section.
+    edge_offset_mm:
+      fb.width_mm - (h.edge_offset_mm ?? fb.width_mm / 2),
+    type: h.type,
+    leg: "a" as const,
+  }));
+  return {
+    ...p,
+    // The STEP shipped to the machine is one geometry; nesting /
+    // quantity is handled separately in the CAM. Force quantity = 1
+    // for the fake-L conversion as the user requested.
+    quantity: 1,
+    notes:
+      (p.notes ? p.notes + " · " : "") +
+      `Enviada como falsa L (truco Bodor, ala B = ${FAKE_LEG_B_MM} mm, qty=1)`,
+    profile: {
+      kind: "angle_profile",
+      length_mm: fb.length_mm,
+      leg_a_mm: fb.width_mm,
+      leg_b_mm: FAKE_LEG_B_MM,
+      thickness_mm: fb.thickness_mm,
+      holes: newHoles,
+      ends: fb.ends,
+    },
+  };
 }
 
 function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
