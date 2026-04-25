@@ -5,19 +5,31 @@ import { loadOC } from "./loader";
 import { buildPart } from "./build";
 import { meshFromShape, type Mesh } from "./mesh-from-shape";
 import { writeStep } from "./write-step";
+import { writeStl } from "./write-stl";
+import type { OC, ShapeHandle } from "./types";
 
 export type WorkerProgress =
   | { kind: "loading_engine" }
   | { kind: "engine_progress"; loaded: number; total: number; files: number }
   | { kind: "engine_ready" }
   | { kind: "building_part"; partIndex: number; totalParts: number }
-  | { kind: "tessellating"; partIndex: number }
-  | { kind: "writing_step"; partIndex: number };
+  | { kind: "tessellating"; partIndex: number };
 
 export type BuildPartResponse = {
   mesh: Mesh;
-  stepContent: string;
   watertight: boolean;
+};
+
+export type ExportFormat = "step" | "stl";
+
+export type ExportResult = {
+  format: ExportFormat;
+  // For STEP we return a string (ASCII). For STL we return a Uint8Array
+  // (binary). Comlink transfers both transparently.
+  content: string | Uint8Array;
+  mime: string;
+  extension: string;
+  bytes: number;
 };
 
 export type ProgressCallback = (event: WorkerProgress) => void;
@@ -26,11 +38,10 @@ let engineLoaded = false;
 let fetchPatched = false;
 let activeProgressCallback: ProgressCallback | null = null;
 
-// Per-URL byte accounting for all .wasm requests fired by
-// opencascade.js during init. Totals grow as new modules register
-// (Content-Length is only known once the response arrives), so the
-// percentage is approximate but gives a useful sense of "almost done".
 const wasmBytes = new Map<string, { loaded: number; total: number }>();
+// Cache of built shapes keyed by part index so the user can "Guardar
+// archivo" later without rebuilding.
+const shapeCache = new Map<number, ShapeHandle>();
 
 function emitEngineProgress() {
   if (!activeProgressCallback) return;
@@ -79,8 +90,6 @@ function patchFetchForWasmProgress() {
               controller.enqueue(value);
               const entry = wasmBytes.get(url)!;
               entry.loaded += value.byteLength;
-              // If Content-Length was missing, grow total alongside
-              // loaded so the bar never shows >100%.
               if (entry.total < entry.loaded) entry.total = entry.loaded;
               emitEngineProgress();
             }
@@ -100,10 +109,36 @@ function patchFetchForWasmProgress() {
   };
 }
 
+function exportShape(
+  oc: OC,
+  shape: ShapeHandle,
+  format: ExportFormat,
+): ExportResult {
+  switch (format) {
+    case "step": {
+      const content = writeStep(oc, shape);
+      return {
+        format,
+        content,
+        mime: "application/step",
+        extension: "step",
+        bytes: content.length,
+      };
+    }
+    case "stl": {
+      const content = writeStl(oc, shape);
+      return {
+        format,
+        content,
+        mime: "model/stl",
+        extension: "stl",
+        bytes: content.byteLength,
+      };
+    }
+  }
+}
+
 const api = {
-  // Called fire-and-forget on page mount so the ~15 MB OpenCascade
-  // WASM download starts in parallel with the user picking a file and
-  // the Claude vision call. Optionally reports byte-level progress.
   async preload(onProgress?: ProgressCallback): Promise<void> {
     if (engineLoaded) {
       onProgress?.({ kind: "engine_ready" });
@@ -125,6 +160,9 @@ const api = {
     return engineLoaded;
   },
 
+  // Build a shape for the given spec, keep it cached by partIndex, and
+  // return the tessellated mesh for the 3D viewer. No file is written
+  // until the user explicitly asks via exportPart().
   async buildPart(
     spec: PartSpec,
     partIndex: number,
@@ -147,11 +185,31 @@ const api = {
     }
     onProgress({ kind: "building_part", partIndex, totalParts });
     const { shape, watertight } = buildPart(oc, spec);
+    shapeCache.set(partIndex, shape);
     onProgress({ kind: "tessellating", partIndex });
     const mesh = meshFromShape(oc, shape);
-    onProgress({ kind: "writing_step", partIndex });
-    const stepContent = writeStep(oc, shape);
-    return { mesh, stepContent, watertight };
+    return { mesh, watertight };
+  },
+
+  // Export a previously-built shape in the requested format. Caller is
+  // responsible for turning `content` into a Blob + download on the
+  // main thread.
+  async exportPart(
+    partIndex: number,
+    format: ExportFormat,
+  ): Promise<ExportResult> {
+    const shape = shapeCache.get(partIndex);
+    if (!shape) {
+      throw new Error(
+        `No hay sólido construido para la pieza ${partIndex + 1}. Pulsa "Construir 3D" primero.`,
+      );
+    }
+    const oc = await loadOC();
+    return exportShape(oc, shape, format);
+  },
+
+  clearCache(): void {
+    shapeCache.clear();
   },
 };
 

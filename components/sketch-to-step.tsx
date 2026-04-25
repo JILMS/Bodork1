@@ -5,7 +5,8 @@ import * as Comlink from "comlink";
 import { Dropzone } from "@/components/dropzone";
 import { MaterialForm, type Hints } from "@/components/material-form";
 import { PartsList } from "@/components/parts-list";
-import { DownloadButton } from "@/components/download-button";
+import { PartEditor } from "@/components/part-editor";
+import { SaveDialog, type SaveFormat } from "@/components/save-dialog";
 import {
   ProgressStepper,
   type StepId,
@@ -17,9 +18,6 @@ import type { Mesh } from "@/lib/occ/mesh-from-shape";
 import { getOccWorker } from "@/lib/occ/client";
 import type { WorkerProgress } from "@/lib/occ/worker";
 
-// Isolate the 3D viewer + r3f/drei/three imports behind a client-only
-// dynamic boundary so any load-time failure in those packages does not
-// crash the whole page on first render.
 const PartViewer = dynamic(
   () => import("@/components/part-viewer").then((m) => m.PartViewer),
   {
@@ -34,13 +32,17 @@ const PartViewer = dynamic(
 
 type PartResult = {
   mesh: Mesh;
-  stepContent: string;
   watertight: boolean;
 };
 
-type Phase = "idle" | "working" | "ready" | "error";
+type Phase =
+  | "idle"
+  | "analyzing"
+  | "awaiting_review"
+  | "building"
+  | "ready"
+  | "error";
 type EngineStatus = "pending" | "loading" | "ready";
-
 type EngineBytes = { loaded: number; total: number; files: number };
 
 type Progress = {
@@ -78,7 +80,7 @@ const INITIAL_PROGRESS: Progress = {
     },
     step: {
       id: "step",
-      label: "Exportar STEP",
+      label: "Exportar archivo",
       state: "pending",
       estimateRangeSec: [0, 2],
     },
@@ -110,13 +112,12 @@ export default function SketchToStep() {
   const [selected, setSelected] = useState(0);
   const [results, setResults] = useState<Record<number, PartResult>>({});
   const [progress, setProgress] = useState<Progress>(INITIAL_PROGRESS);
+  const [error, setError] = useState<string | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
 
-  // Keep a ref to the latest engineBytes so the buildPart flow can also
-  // display byte-level progress if the preload didn't finish in time.
   const engineBytesRef = useRef<EngineBytes | null>(null);
   engineBytesRef.current = engineBytes;
 
-  // Preload OCC WASM on mount with byte-level progress reporting.
   useEffect(() => {
     let cancelled = false;
     setEngine("loading");
@@ -134,12 +135,9 @@ export default function SketchToStep() {
           }
         };
         await worker.preload(Comlink.proxy(onProg));
-        if (!cancelled) {
-          setEngine("ready");
-        }
+        if (!cancelled) setEngine("ready");
       } catch {
-        // Swallow: a real user action will surface the error via the
-        // normal error path.
+        // swallow
       }
     })();
     return () => {
@@ -149,7 +147,6 @@ export default function SketchToStep() {
 
   const stepsArray: StepInfo[] = useMemo(() => {
     const arr = progress.order.map((id) => ({ ...progress.steps[id] }));
-    // Attach live engine bytes to the active engine row.
     const engineRow = arr.find((s) => s.id === "engine");
     if (
       engineRow &&
@@ -187,10 +184,11 @@ export default function SketchToStep() {
 
   const handleFile = useCallback(
     async (file: File) => {
-      setPhase("working");
+      setPhase("analyzing");
       setDrawing(null);
       setResults({});
       setSelected(0);
+      setError(null);
       setProgress(() => {
         const base = INITIAL_PROGRESS;
         if (engine === "ready") {
@@ -255,75 +253,20 @@ export default function SketchToStep() {
         const { drawing: raw } = (await res.json()) as { drawing: Drawing };
         const d = applyClientHints(raw, hints);
         setDrawing(d);
+        const missingCount = d.missing_fields?.length ?? 0;
         markDone(
           "analyze",
           Date.now() - t1,
-          `${d.parts.length} pieza${d.parts.length === 1 ? "" : "s"} detectada${d.parts.length === 1 ? "" : "s"}`,
+          `${d.parts.length} pieza${d.parts.length === 1 ? "" : "s"}${
+            missingCount > 0
+              ? ` · ${missingCount} cota${missingCount === 1 ? "" : "s"} a revisar`
+              : ""
+          }`,
         );
-
-        const worker = getOccWorker();
-        const next: Record<number, PartResult> = {};
-        let engineStart: number | null = null;
-        let buildTotalMs = 0;
-
-        const onProgress = (evt: WorkerProgress) => {
-          switch (evt.kind) {
-            case "loading_engine":
-              engineStart = Date.now();
-              markActive("engine");
-              break;
-            case "engine_progress":
-              setEngineBytes({
-                loaded: evt.loaded,
-                total: evt.total,
-                files: evt.files,
-              });
-              break;
-            case "engine_ready":
-              if (engineStart !== null) {
-                markDone("engine", Date.now() - engineStart);
-              } else {
-                markDone("engine", 0, "Ya estaba en caché");
-              }
-              setEngine("ready");
-              break;
-            case "building_part":
-              markActive(
-                "build",
-                `Pieza ${evt.partIndex + 1} de ${evt.totalParts}`,
-              );
-              break;
-            case "tessellating":
-              setProgress((p) =>
-                updateStep(p, "build", {
-                  note: `Pieza ${evt.partIndex + 1}: mallando para el visor…`,
-                }),
-              );
-              break;
-            case "writing_step":
-              markActive("step", `Pieza ${evt.partIndex + 1}`);
-              break;
-          }
-        };
-        const proxiedProgress = Comlink.proxy(onProgress);
-
-        for (let i = 0; i < d.parts.length; i++) {
-          const partT = Date.now();
-          const out = await worker.buildPart(
-            d.parts[i],
-            i,
-            d.parts.length,
-            proxiedProgress,
-          );
-          next[i] = out as PartResult;
-          setResults({ ...next });
-          buildTotalMs += Date.now() - partT;
-        }
-        markDone("build", buildTotalMs);
-        markDone("step", Math.max(1, buildTotalMs * 0.05));
-        setPhase("ready");
+        setPhase("awaiting_review");
       } catch (e) {
         const msg = (e as Error).message;
+        setError(msg);
         setProgress((p) => {
           const activeId =
             p.order.find((id) => p.steps[id].state === "active") ?? "analyze";
@@ -335,9 +278,152 @@ export default function SketchToStep() {
     [engine, hints],
   );
 
+  const handleBuild = useCallback(async () => {
+    if (!drawing) return;
+    setPhase("building");
+    setError(null);
+    setResults({});
+
+    const markActive = (id: StepId, note?: string) =>
+      setProgress((p) =>
+        updateStep(p, id, { state: "active", ...(note ? { note } : {}) }),
+      );
+    const markDone = (id: StepId, elapsedMs: number, note?: string) =>
+      setProgress((p) =>
+        updateStep(p, id, {
+          state: "done",
+          elapsedMs,
+          ...(note ? { note } : {}),
+        }),
+      );
+
+    try {
+      const worker = getOccWorker();
+      await worker.clearCache();
+      const next: Record<number, PartResult> = {};
+      let engineStart: number | null = null;
+      let buildTotalMs = 0;
+
+      const onProgress = (evt: WorkerProgress) => {
+        switch (evt.kind) {
+          case "loading_engine":
+            engineStart = Date.now();
+            markActive("engine");
+            break;
+          case "engine_progress":
+            setEngineBytes({
+              loaded: evt.loaded,
+              total: evt.total,
+              files: evt.files,
+            });
+            break;
+          case "engine_ready":
+            if (engineStart !== null) {
+              markDone("engine", Date.now() - engineStart);
+            } else {
+              markDone("engine", 0, "Ya estaba en caché");
+            }
+            setEngine("ready");
+            break;
+          case "building_part":
+            markActive(
+              "build",
+              `Pieza ${evt.partIndex + 1} de ${evt.totalParts}`,
+            );
+            break;
+          case "tessellating":
+            setProgress((p) =>
+              updateStep(p, "build", {
+                note: `Pieza ${evt.partIndex + 1}: mallando para el visor…`,
+              }),
+            );
+            break;
+        }
+      };
+      const proxiedProgress = Comlink.proxy(onProgress);
+
+      for (let i = 0; i < drawing.parts.length; i++) {
+        const partT = Date.now();
+        const out = await worker.buildPart(
+          drawing.parts[i],
+          i,
+          drawing.parts.length,
+          proxiedProgress,
+        );
+        next[i] = out as PartResult;
+        setResults({ ...next });
+        buildTotalMs += Date.now() - partT;
+      }
+      markDone("build", buildTotalMs);
+      // The exporter is lazy now — mark it as "pending save" until the
+      // user clicks Guardar.
+      setProgress((p) =>
+        updateStep(p, "step", {
+          state: "pending",
+          note: "Pulsa Guardar archivo cuando estés listo",
+        }),
+      );
+      setPhase("ready");
+    } catch (e) {
+      const msg = (e as Error).message;
+      setError(msg);
+      setProgress((p) => {
+        const activeId =
+          p.order.find((id) => p.steps[id].state === "active") ?? "build";
+        return updateStep(p, activeId, { state: "error", error: msg });
+      });
+      setPhase("error");
+    }
+  }, [drawing]);
+
+  const handleSave = useCallback(
+    async ({ filename, format }: { filename: string; format: SaveFormat }) => {
+      const worker = getOccWorker();
+      const t0 = Date.now();
+      setProgress((p) =>
+        updateStep(p, "step", {
+          state: "active",
+          note: `Generando ${format.toUpperCase()}…`,
+        }),
+      );
+      const out = await worker.exportPart(selected, format);
+      const part: BlobPart =
+        out.content instanceof Uint8Array
+          ? new Uint8Array(
+              out.content.buffer as ArrayBuffer,
+              out.content.byteOffset,
+              out.content.byteLength,
+            )
+          : out.content;
+      const blob = new Blob([part], { type: out.mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${filename}.${out.extension}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setProgress((p) =>
+        updateStep(p, "step", {
+          state: "done",
+          elapsedMs: Date.now() - t0,
+          note: `${out.extension.toUpperCase()} · ${(out.bytes / 1024).toFixed(1)} KB`,
+        }),
+      );
+    },
+    [selected],
+  );
+
   const currentResult = drawing ? results[selected] : undefined;
   const currentName = drawing?.parts[selected]?.name ?? `pieza_${selected + 1}`;
-  const isWorking = phase === "working";
+  const isWorking =
+    phase === "analyzing" || phase === "building";
+  const showEditor =
+    drawing &&
+    (phase === "awaiting_review" ||
+      phase === "ready" ||
+      phase === "building");
 
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-6xl flex-col gap-4 p-3 sm:p-5 lg:p-6">
@@ -347,8 +433,11 @@ export default function SketchToStep() {
             Bodor Sketch → STEP
           </h1>
           <p className="text-[11px] text-bodor-muted sm:text-xs">
-            Foto o PDF del plano → sólido B-Rep estanco → archivo .STEP para la
-            K1.
+            Foto o PDF del plano → sólido B-Rep estanco → archivo STEP/STL
+            para la K1.{" "}
+            <span className="text-bodor-accent">
+              La Bodor K1 empieza a cortar por el extremo izquierdo (X=0).
+            </span>
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -357,20 +446,20 @@ export default function SketchToStep() {
         </div>
       </header>
 
-      <div className="grid flex-1 gap-4 lg:grid-cols-[340px_1fr]">
+      <div className="grid flex-1 gap-4 lg:grid-cols-[360px_1fr]">
         <aside className="flex flex-col gap-4">
           <Dropzone onFile={handleFile} disabled={isWorking} />
           <MaterialForm value={hints} onChange={setHints} />
 
-          {!isWorking && phase !== "ready" && phase !== "error" && (
+          {!drawing && engine !== "ready" && (
             <div className="rounded-lg border border-bodor-line bg-bodor-panel/60 p-3">
               <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-bodor-muted">
                 Motor CAD (precarga)
               </h2>
               <ProgressStepper steps={[preloadStep]} />
               <p className="mt-2 text-[10px] text-bodor-muted">
-                Se descarga ~15 MB de WebAssembly la primera vez. Después queda
-                cacheado y este paso es instantáneo.
+                Se descarga ~15 MB de WebAssembly la primera vez. Después
+                queda cacheado y este paso es instantáneo.
               </p>
             </div>
           )}
@@ -392,6 +481,16 @@ export default function SketchToStep() {
             />
           )}
 
+          {showEditor && drawing && (
+            <PartEditor
+              drawing={drawing}
+              onChange={setDrawing}
+              onBuild={handleBuild}
+              canBuild={engine === "ready"}
+              isBuilding={phase === "building"}
+            />
+          )}
+
           {currentResult && (
             <div className="flex flex-col gap-2">
               <div
@@ -405,31 +504,49 @@ export default function SketchToStep() {
                   ? "Sólido estanco ✓"
                   : "Atención: el sólido podría no ser estanco."}
               </div>
-              <DownloadButton
-                stepContent={currentResult.stepContent}
-                filename={`${currentName}.step`}
-              />
+              <button
+                type="button"
+                onClick={() => setSaveOpen(true)}
+                className="h-11 w-full rounded bg-bodor-accent px-4 text-sm font-semibold text-bodor-bg transition-colors hover:bg-bodor-accent/90"
+              >
+                Guardar archivo
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
+              {error}
             </div>
           )}
         </aside>
 
         <section className="relative h-[55vh] min-h-[320px] overflow-hidden rounded-lg border border-bodor-line bg-bodor-panel lg:h-auto">
           <PartViewer mesh={currentResult?.mesh ?? null} />
+          {!currentResult && drawing && phase === "awaiting_review" && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 text-center text-[11px] text-bodor-muted">
+              Revisa las cotas a la izquierda y pulsa <em>Construir 3D</em>
+              <br />para ver aquí el sólido.
+            </div>
+          )}
         </section>
       </div>
 
       <footer className="pb-2 text-center text-[10px] text-bodor-muted">
-        Bodor K1 · 3 kW · O₂/N₂ · STEP AP214 en milímetros
+        Bodor K1 · 3 kW · O₂/N₂ · STEP AP214 en milímetros · origen X=0 en
+        extremo izquierdo
       </footer>
+
+      <SaveDialog
+        open={saveOpen}
+        defaultName={currentName}
+        onClose={() => setSaveOpen(false)}
+        onSave={handleSave}
+      />
     </main>
   );
 }
 
-// Post-process the drawing returned by the model with the UI hints:
-// - If the user forced a corner radius, inject it into every tube that
-//   doesn't already have one.
-// - Material override: if the user picked a material explicitly via
-//   the form, use it when the model left the default in place.
 function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
   return {
     ...drawing,
@@ -455,7 +572,9 @@ function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
 function PhaseBadge({ phase }: { phase: Phase }) {
   const map: Record<Phase, { text: string; cls: string }> = {
     idle: { text: "Listo", cls: "text-bodor-muted" },
-    working: { text: "Procesando…", cls: "text-bodor-accent" },
+    analyzing: { text: "Analizando…", cls: "text-bodor-accent" },
+    awaiting_review: { text: "Revisa cotas", cls: "text-amber-300" },
+    building: { text: "Construyendo 3D…", cls: "text-bodor-accent" },
     ready: { text: "Preparado", cls: "text-emerald-400" },
     error: { text: "Error", cls: "text-red-400" },
   };

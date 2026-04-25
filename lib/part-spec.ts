@@ -92,6 +92,22 @@ export const ProfileZ = z.discriminatedUnion("kind", [
   AngleProfileZ,
 ]);
 
+// A measurement that Claude couldn't read cleanly from the photo.
+// `field_path` is dot/bracket notation relative to the PartSpec
+// (e.g. "profile.length_mm", "profile.holes[2].position_mm").
+// `current_value` is the model's best guess used as a placeholder so
+// the build can still run, but the UI marks it as "to confirm" until
+// the operator verifies or edits it.
+export const MissingFieldZ = z.object({
+  part_index: z.number().int().nonnegative(),
+  field_path: z.string(),
+  label: z.string(),
+  reason: z.string().optional(),
+  current_value: z.number().optional(),
+});
+
+export type MissingField = z.infer<typeof MissingFieldZ>;
+
 export const PartSpecZ = z.object({
   name: z.string().optional(),
   material: MaterialZ.default("acero_carbono"),
@@ -102,6 +118,7 @@ export const PartSpecZ = z.object({
 
 export const DrawingZ = z.object({
   parts: z.array(PartSpecZ).min(1),
+  missing_fields: z.array(MissingFieldZ).default([]),
 });
 
 export type Material = z.infer<typeof MaterialZ>;
@@ -123,6 +140,22 @@ export const DRAWING_JSON_SCHEMA = {
   type: "object",
   required: ["parts"],
   properties: {
+    missing_fields: {
+      type: "array",
+      description:
+        "List every measurement that is NOT clearly readable in the photo. Provide a best-guess current_value so the build can still run, and the UI will ask the operator to confirm.",
+      items: {
+        type: "object",
+        required: ["part_index", "field_path", "label"],
+        properties: {
+          part_index: { type: "integer", minimum: 0 },
+          field_path: { type: "string" },
+          label: { type: "string" },
+          reason: { type: "string" },
+          current_value: { type: "number" },
+        },
+      },
+    },
     parts: {
       type: "array",
       minItems: 1,
