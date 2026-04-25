@@ -549,6 +549,14 @@ export default function SketchToStep() {
       <footer className="pb-2 text-center text-[10px] text-bodor-muted">
         Bodor K1 · 3 kW · O₂/N₂ · STEP AP214 en milímetros · origen X=0 en
         extremo izquierdo
+        {process.env.NEXT_PUBLIC_BUILD_ID && (
+          <>
+            {" · "}
+            <span title="Hash del commit desplegado">
+              build {process.env.NEXT_PUBLIC_BUILD_ID}
+            </span>
+          </>
+        )}
       </footer>
 
       <SaveDialog
