@@ -581,22 +581,33 @@ const FAKE_LEG_B_MM = 1;
 function pletinaToFakeAngle(p: PartSpec): PartSpec {
   if (p.profile.kind !== "flat_bar") return p;
   const fb = p.profile;
+  const flipY = (eo: number | undefined) =>
+    fb.width_mm - (eo ?? fb.width_mm / 2);
   const newHoles = fb.holes.map((h) => ({
     diameter_mm: h.diameter_mm,
     position_mm: h.position_mm,
-    // flat_bar edge_offset is from Y=0 (one edge); angle leg-a
-    // edge_offset is from Y=leg_a (outer edge). Flip so the hole
-    // ends up at the same physical Y in the L cross-section.
-    edge_offset_mm:
-      fb.width_mm - (h.edge_offset_mm ?? fb.width_mm / 2),
+    edge_offset_mm: flipY(h.edge_offset_mm),
     type: h.type,
+    leg: "a" as const,
+  }));
+  const newSlots = fb.slots.map((s) => ({
+    length_mm: s.length_mm,
+    width_mm: s.width_mm,
+    position_mm: s.position_mm,
+    edge_offset_mm: flipY(s.edge_offset_mm),
+    rotation_deg: s.rotation_deg,
+    leg: "a" as const,
+  }));
+  const newCutouts = fb.cutouts.map((c) => ({
+    length_mm: c.length_mm,
+    width_mm: c.width_mm,
+    position_mm: c.position_mm,
+    edge_offset_mm: flipY(c.edge_offset_mm),
+    rotation_deg: c.rotation_deg,
     leg: "a" as const,
   }));
   return {
     ...p,
-    // The STEP shipped to the machine is one geometry; nesting /
-    // quantity is handled separately in the CAM. Force quantity = 1
-    // for the fake-L conversion as the user requested.
     quantity: 1,
     notes:
       (p.notes ? p.notes + " · " : "") +
@@ -608,6 +619,8 @@ function pletinaToFakeAngle(p: PartSpec): PartSpec {
       leg_b_mm: FAKE_LEG_B_MM,
       thickness_mm: fb.thickness_mm,
       holes: newHoles,
+      slots: newSlots,
+      cutouts: newCutouts,
       ends: fb.ends,
     },
   };

@@ -328,6 +328,46 @@ export function PartEditor({
                     })}
                   </div>
                 )}
+
+              {(p.profile.kind === "flat_bar" ||
+                p.profile.kind === "angle_profile") &&
+                (p.profile.slots.length > 0 || p.profile.cutouts.length > 0) && (
+                  <div className="col-span-2 mt-2 flex flex-col gap-1 rounded border border-bodor-accent/30 bg-bodor-accent/5 p-2 text-[11px]">
+                    <div className="font-semibold text-bodor-accent">
+                      Slots y recortes detectados
+                    </div>
+                    {p.profile.slots.map((s, si) => (
+                      <div key={`s${si}`} className="text-bodor-text">
+                        ▣ Slot #{si + 1}: {s.length_mm}×{s.width_mm} mm @
+                        {" "}X={s.position_mm}
+                        {s.edge_offset_mm !== undefined
+                          ? ` · Y=${s.edge_offset_mm}`
+                          : ""}
+                        {s.rotation_deg
+                          ? ` · giro ${s.rotation_deg}°`
+                          : ""}
+                        {p.profile.kind === "angle_profile" && "leg" in s
+                          ? ` · ala ${(s as { leg: string }).leg.toUpperCase()}`
+                          : ""}
+                      </div>
+                    ))}
+                    {p.profile.cutouts.map((c, ci) => (
+                      <div key={`c${ci}`} className="text-bodor-text">
+                        ▭ Recorte #{ci + 1}: {c.length_mm}×{c.width_mm} mm @
+                        {" "}X={c.position_mm}
+                        {c.edge_offset_mm !== undefined
+                          ? ` · Y=${c.edge_offset_mm}`
+                          : ""}
+                        {c.rotation_deg
+                          ? ` · giro ${c.rotation_deg}°`
+                          : ""}
+                        {p.profile.kind === "angle_profile" && "leg" in c
+                          ? ` · ala ${(c as { leg: string }).leg.toUpperCase()}`
+                          : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
             </div>
           </details>
         );

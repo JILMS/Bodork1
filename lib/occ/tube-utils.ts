@@ -57,7 +57,7 @@ function translate(
   const trsf = new oc.gp_Trsf_1();
   trsf.SetTranslation_1(new oc.gp_Vec_4(dx, dy, dz));
   const loc = new oc.TopLoc_Location_2(trsf);
-  return shape.Moved(loc, false);
+  return shape.Moved(loc);
 }
 
 // Iterates edges of a box-like solid and applies a fillet of `radius`

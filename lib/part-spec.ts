@@ -15,6 +15,31 @@ export const HoleZ = z.object({
   type: z.enum(["through", "countersunk"]).default("through"),
 });
 
+// Oblong / slotted hole (agujero oblongo, "coliso"). The slot is a
+// stadium shape: a rectangle of length×width with the two short ends
+// rounded by half-width. position_mm is the X coordinate of the slot
+// CENTER. rotation_deg = 0 means the long axis runs parallel to X.
+export const SlotZ = z.object({
+  length_mm: z.number().positive(),
+  width_mm: z.number().positive(),
+  position_mm: z.number().nonnegative(),
+  edge_offset_mm: z.number().optional(),
+  rotation_deg: z.number().default(0),
+});
+
+// Rectangular cutout / window. Sharp corners. Same coordinate
+// convention as SlotZ.
+export const CutoutZ = z.object({
+  length_mm: z.number().positive(),
+  width_mm: z.number().positive(),
+  position_mm: z.number().nonnegative(),
+  edge_offset_mm: z.number().optional(),
+  rotation_deg: z.number().default(0),
+});
+
+export type Slot = z.infer<typeof SlotZ>;
+export type Cutout = z.infer<typeof CutoutZ>;
+
 export const EndCutZ = z.object({
   angle_deg: z.number().min(1).max(179),
 });
@@ -29,6 +54,8 @@ export const FlatBarZ = z.object({
   width_mm: z.number().positive(),
   thickness_mm: z.number().positive(),
   holes: z.array(HoleZ).default([]),
+  slots: z.array(SlotZ).default([]),
+  cutouts: z.array(CutoutZ).default([]),
   ends: EndsZ,
 });
 
@@ -80,6 +107,12 @@ export const AngleProfileZ = z.object({
   thickness_mm: z.number().positive(),
   holes: z
     .array(HoleZ.extend({ leg: z.enum(["a", "b"]) }))
+    .default([]),
+  slots: z
+    .array(SlotZ.extend({ leg: z.enum(["a", "b"]) }))
+    .default([]),
+  cutouts: z
+    .array(CutoutZ.extend({ leg: z.enum(["a", "b"]) }))
     .default([]),
   ends: EndsZ,
 });
@@ -199,6 +232,8 @@ export const DRAWING_JSON_SCHEMA = {
                       },
                     },
                   },
+                  slots: { type: "array", items: slotItemSchema() },
+                  cutouts: { type: "array", items: cutoutItemSchema() },
                   ends: endsSchema(),
                 },
               },
@@ -311,10 +346,19 @@ export const DRAWING_JSON_SCHEMA = {
                       properties: {
                         diameter_mm: { type: "number" },
                         position_mm: { type: "number" },
+                        edge_offset_mm: { type: "number" },
                         leg: { enum: ["a", "b"] },
                         type: { enum: ["through", "countersunk"] },
                       },
                     },
+                  },
+                  slots: {
+                    type: "array",
+                    items: slotItemSchema(["a", "b"]),
+                  },
+                  cutouts: {
+                    type: "array",
+                    items: cutoutItemSchema(["a", "b"]),
                   },
                   ends: endsSchema(),
                 },
@@ -326,6 +370,30 @@ export const DRAWING_JSON_SCHEMA = {
     },
   },
 } as const;
+
+function slotItemSchema(legEnum?: string[]): Record<string, unknown> {
+  const props: Record<string, unknown> = {
+    length_mm: { type: "number" },
+    width_mm: { type: "number" },
+    position_mm: { type: "number" },
+    edge_offset_mm: { type: "number" },
+    rotation_deg: { type: "number" },
+  };
+  if (legEnum) props.leg = { enum: legEnum };
+  return {
+    type: "object",
+    required: legEnum
+      ? ["length_mm", "width_mm", "position_mm", "leg"]
+      : ["length_mm", "width_mm", "position_mm"],
+    properties: props,
+  };
+}
+
+function cutoutItemSchema(legEnum?: string[]): Record<string, unknown> {
+  // Same shape as slot but conceptually a sharp-cornered rectangular
+  // cutout, not a stadium.
+  return slotItemSchema(legEnum);
+}
 
 function endsSchema() {
   return {

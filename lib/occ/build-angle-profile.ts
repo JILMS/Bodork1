@@ -1,10 +1,16 @@
-import type { AngleProfile, Hole } from "../part-spec";
+import type { AngleProfile, Cutout, Hole, Slot } from "../part-spec";
 import type { OC, ShapeHandle } from "./types";
 import {
   cutMany,
   makeBox,
   makeCylinder,
 } from "./geom-utils";
+import {
+  flatFaceFrame,
+  legBFaceFrame,
+  makeRectTool,
+  makeSlotTool,
+} from "./cut-features";
 
 // Builds an L-shaped (angle) profile along the X axis.
 //
@@ -52,6 +58,12 @@ export function buildAngleProfile(
   const tools: ShapeHandle[] = holes.map((h) =>
     holeTool(oc, h, leg_a_mm, leg_b_mm, t, overshoot),
   );
+  for (const s of spec.slots) {
+    tools.push(slotOrRectTool(oc, s, "slot", t, leg_a_mm, leg_b_mm, overshoot));
+  }
+  for (const c of spec.cutouts) {
+    tools.push(slotOrRectTool(oc, c, "rect", t, leg_a_mm, leg_b_mm, overshoot));
+  }
 
   // Silence unused-import lint when there are no holes.
   void slabA;
@@ -59,6 +71,70 @@ export function buildAngleProfile(
 
   if (tools.length === 0) return fused;
   return cutMany(oc, fused, tools);
+}
+
+function slotOrRectTool(
+  oc: OC,
+  feat: (Slot | Cutout) & { leg: "a" | "b" },
+  kind: "slot" | "rect",
+  thickness: number,
+  legA: number,
+  legB: number,
+  overshoot: number,
+): ShapeHandle {
+  const depth = thickness + overshoot * 2;
+  if (feat.leg === "a") {
+    const y =
+      feat.edge_offset_mm !== undefined
+        ? legA - feat.edge_offset_mm
+        : thickness + Math.max(legA - thickness, 0) / 2;
+    const frame = flatFaceFrame(feat.position_mm, y, thickness, overshoot);
+    return kind === "slot"
+      ? makeSlotTool(
+          oc,
+          frame,
+          feat.length_mm,
+          feat.width_mm,
+          depth,
+          feat.rotation_deg ?? 0,
+        )
+      : makeRectTool(
+          oc,
+          frame,
+          feat.length_mm,
+          feat.width_mm,
+          depth,
+          feat.rotation_deg ?? 0,
+        );
+  }
+  const offsetFromTop =
+    feat.edge_offset_mm !== undefined
+      ? feat.edge_offset_mm
+      : Math.max(legB - thickness, 0) / 2;
+  const frame = legBFaceFrame(
+    feat.position_mm,
+    offsetFromTop,
+    legB,
+    thickness,
+    overshoot,
+  );
+  return kind === "slot"
+    ? makeSlotTool(
+        oc,
+        frame,
+        feat.length_mm,
+        feat.width_mm,
+        depth,
+        feat.rotation_deg ?? 0,
+      )
+    : makeRectTool(
+        oc,
+        frame,
+        feat.length_mm,
+        feat.width_mm,
+        depth,
+        feat.rotation_deg ?? 0,
+      );
 }
 
 function holeTool(

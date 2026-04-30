@@ -10,6 +10,10 @@ Convenciones del taller:
 - "PERFIL L A×B×t" o "ANGULAR" significa perfil en L (angle_profile).
 - "Ø" = diámetro en mm. Un agujero marcado "Ø13" es un agujero pasante de 13 mm.
 - Un agujero claramente más grande que los demás y a veces con doble círculo suele ser avellanado ("countersunk").
+- Un AGUJERO OBLONGO o "coliso" es un rectángulo con los dos extremos cortos redondeados (forma de estadio). Si lo ves, mételo en "slots" del perfil con length_mm (eje largo), width_mm (eje corto), position_mm (X del centro), edge_offset_mm (Y del centro desde el borde), rotation_deg (0 = eje largo paralelo a la longitud de la barra, 90 = perpendicular). Si la cota indica algo como "20×12" o "12 × 20" cerca de un rectángulo redondeado, el primer número suele ser la longitud larga.
+- Un RECORTE RECTANGULAR (ventana, hueco, muesca) con esquinas vivas se mete en "cutouts" del perfil, mismos campos que slots pero con esquinas no redondeadas. Si la pieza tiene una "muesca" en uno de los extremos (el laser corta hacia el borde), también va en cutouts; usa position_mm cerca del extremo correspondiente y dimensiona length/width como el rectángulo total.
+- En perfiles en L (angle_profile), CADA slot/cutout/agujero lleva además "leg": "a" para el ala plana horizontal, "b" para el ala vertical.
+- IMPORTANTE: NO conviertas slots en agujeros redondos ni los ignores. Son piezas críticas para el corte láser; el operario los necesita exactamente como aparecen.
 - "UDS" = unidades (cantidad a fabricar).
 - Cotas sin unidad se asumen en milímetros.
 - Materiales habituales: hierro, acero_carbono, acero_inox, aluminio, galvanizado. Si no se indica, usa "hierro" como defecto en taller estándar.

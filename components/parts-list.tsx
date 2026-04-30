@@ -46,16 +46,30 @@ function displayName(p: PartSpec, i: number) {
 
 function describeProfile(p: PartSpec): string {
   const pr = p.profile;
+  const extras = featureCounts(p);
   switch (pr.kind) {
     case "flat_bar":
-      return `Pletina ${pr.width_mm}×${pr.thickness_mm} × ${pr.length_mm} mm · ${pr.holes.length} agujeros`;
+      return `Pletina ${pr.width_mm}×${pr.thickness_mm} × ${pr.length_mm} mm · ${extras}`;
     case "round_tube":
-      return `Tubo Ø${pr.outer_diameter_mm}×${pr.wall_thickness_mm} × ${pr.length_mm} mm`;
+      return `Tubo Ø${pr.outer_diameter_mm}×${pr.wall_thickness_mm} × ${pr.length_mm} mm · ${extras}`;
     case "square_tube":
-      return `Tubo □${pr.side_mm}×${pr.wall_thickness_mm}${pr.corner_radius_mm ? ` (R${pr.corner_radius_mm})` : ""} × ${pr.length_mm} mm`;
+      return `Tubo □${pr.side_mm}×${pr.wall_thickness_mm}${pr.corner_radius_mm ? ` (R${pr.corner_radius_mm})` : ""} × ${pr.length_mm} mm · ${extras}`;
     case "rectangular_tube":
-      return `Tubo ▭${pr.width_mm}×${pr.height_mm}×${pr.wall_thickness_mm}${pr.corner_radius_mm ? ` (R${pr.corner_radius_mm})` : ""} × ${pr.length_mm} mm`;
+      return `Tubo ▭${pr.width_mm}×${pr.height_mm}×${pr.wall_thickness_mm}${pr.corner_radius_mm ? ` (R${pr.corner_radius_mm})` : ""} × ${pr.length_mm} mm · ${extras}`;
     case "angle_profile":
-      return `Perfil L ${pr.leg_a_mm}×${pr.leg_b_mm}×${pr.thickness_mm} × ${pr.length_mm} mm`;
+      return `Perfil L ${pr.leg_a_mm}×${pr.leg_b_mm}×${pr.thickness_mm} × ${pr.length_mm} mm · ${extras}`;
   }
+}
+
+function featureCounts(p: PartSpec): string {
+  const pr = p.profile;
+  const parts: string[] = [];
+  if (pr.kind === "flat_bar" || pr.kind === "angle_profile") {
+    if (pr.holes.length) parts.push(`${pr.holes.length} agujero${pr.holes.length === 1 ? "" : "s"}`);
+    if (pr.slots.length) parts.push(`${pr.slots.length} slot${pr.slots.length === 1 ? "" : "s"}`);
+    if (pr.cutouts.length) parts.push(`${pr.cutouts.length} recorte${pr.cutouts.length === 1 ? "" : "s"}`);
+  } else if (pr.kind === "round_tube" || pr.kind === "square_tube" || pr.kind === "rectangular_tube") {
+    if (pr.holes.length) parts.push(`${pr.holes.length} agujero${pr.holes.length === 1 ? "" : "s"}`);
+  }
+  return parts.length ? parts.join(", ") : "sin perforaciones";
 }

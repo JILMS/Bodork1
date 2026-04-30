@@ -1,6 +1,11 @@
 import type { FlatBar, Hole } from "../part-spec";
 import type { OC, ShapeHandle } from "./types";
 import { cutMany, makeBox, makeCylinder } from "./geom-utils";
+import {
+  flatFaceFrame,
+  makeRectTool,
+  makeSlotTool,
+} from "./cut-features";
 
 // Builds a flat bar along the X axis:
 //   X = length (0 .. length_mm)
@@ -9,16 +14,44 @@ import { cutMany, makeBox, makeCylinder } from "./geom-utils";
 //
 // Holes are drilled through the thickness (Z axis). position_mm is along X,
 // edge_offset_mm is measured from Y=0 (defaults to the centerline).
-// Countersunk holes are modeled as a cylinder + a cone on top so the
-// exported STEP reflects the real cut geometry the laser will make.
+// Slots and rectangular cutouts are also placed on the top face.
 export function buildFlatBar(oc: OC, spec: FlatBar): ShapeHandle {
-  const { length_mm, width_mm, thickness_mm, holes } = spec;
+  const { length_mm, width_mm, thickness_mm, holes, slots, cutouts } = spec;
 
   const body = makeBox(oc, length_mm, width_mm, thickness_mm);
   const overshoot = 0.1; // make the drill slightly longer to guarantee a clean cut
-  const tools: ShapeHandle[] = holes.map((h) =>
-    holeTool(oc, h, width_mm, thickness_mm, overshoot),
-  );
+  const tools: ShapeHandle[] = [];
+  for (const h of holes) {
+    tools.push(holeTool(oc, h, width_mm, thickness_mm, overshoot));
+  }
+  for (const s of slots) {
+    const y = s.edge_offset_mm ?? width_mm / 2;
+    const frame = flatFaceFrame(s.position_mm, y, thickness_mm, overshoot);
+    tools.push(
+      makeSlotTool(
+        oc,
+        frame,
+        s.length_mm,
+        s.width_mm,
+        thickness_mm + overshoot * 2,
+        s.rotation_deg ?? 0,
+      ),
+    );
+  }
+  for (const c of cutouts) {
+    const y = c.edge_offset_mm ?? width_mm / 2;
+    const frame = flatFaceFrame(c.position_mm, y, thickness_mm, overshoot);
+    tools.push(
+      makeRectTool(
+        oc,
+        frame,
+        c.length_mm,
+        c.width_mm,
+        thickness_mm + overshoot * 2,
+        c.rotation_deg ?? 0,
+      ),
+    );
+  }
   return cutMany(oc, body, tools);
 }
 
