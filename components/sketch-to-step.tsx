@@ -33,6 +33,9 @@ const PartViewer = dynamic(
 type PartResult = {
   mesh: Mesh;
   watertight: boolean;
+  // The spec actually built (after the pletina→fake-L conversion etc).
+  // Used by the viewer to draw feature markers in the right frame.
+  builtSpec: PartSpec;
 };
 
 type Phase =
@@ -354,7 +357,11 @@ export default function SketchToStep() {
           drawing.parts.length,
           proxiedProgress,
         );
-        next[i] = out as PartResult;
+        next[i] = {
+          mesh: out.mesh,
+          watertight: out.watertight,
+          builtSpec: specForBuild,
+        };
         setResults({ ...next });
         buildTotalMs += Date.now() - partT;
       }
@@ -536,7 +543,10 @@ export default function SketchToStep() {
         </aside>
 
         <section className="relative h-[55vh] min-h-[320px] overflow-hidden rounded-lg border border-bodor-line bg-bodor-panel lg:h-auto">
-          <PartViewer mesh={currentResult?.mesh ?? null} />
+          <PartViewer
+            mesh={currentResult?.mesh ?? null}
+            spec={currentResult?.builtSpec}
+          />
           {!currentResult && drawing && phase === "awaiting_review" && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 text-center text-[11px] text-bodor-muted">
               Revisa las cotas a la izquierda y pulsa <em>Construir 3D</em>

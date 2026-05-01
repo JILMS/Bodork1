@@ -9,7 +9,10 @@ export type Mesh = {
 // Tessellates an OCC shape into a triangle mesh suitable for three.js.
 // Uses BRepMesh_IncrementalMesh and iterates the faces via TopExp_Explorer.
 export function meshFromShape(oc: OC, shape: ShapeHandle): Mesh {
-  new oc.BRepMesh_IncrementalMesh_2(shape, 0.5, false, 0.5, false);
+  // 0.2 mm linear deflection: small enough that 8-15 mm holes look
+  // smooth (~32 facets per circle), big enough to keep mesh size sane
+  // for 2 m bars. Angular deflection 0.5 rad keeps tubes acceptable.
+  new oc.BRepMesh_IncrementalMesh_2(shape, 0.2, false, 0.5, false);
 
   const positions: number[] = [];
   const normals: number[] = [];
