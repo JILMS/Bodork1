@@ -7,7 +7,9 @@ import {
 } from "@/lib/anthropic-prompt";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Extended thinking + tool use on a dense engineering drawing can take
+// a while; bump the function timeout accordingly.
+export const maxDuration = 120;
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/webp" | "image/gif";
 type DocumentMediaType = "application/pdf";
@@ -92,44 +94,110 @@ export async function POST(req: NextRequest) {
         },
       };
 
-  const response = await anthropic.messages.create({
-    // Sonnet 4.6: ~3-5x faster than Opus for vision on technical drawings,
-    // accuracy is plenty for shop sketches.
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    system: [
-      {
-        type: "text",
-        text: VISION_SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    tools: [
-      {
-        name: "submit_drawing",
-        description: SUBMIT_DRAWING_TOOL_DESCRIPTION,
-        input_schema: DRAWING_JSON_SCHEMA as unknown as Anthropic.Messages.Tool.InputSchema,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    tool_choice: { type: "tool", name: "submit_drawing" },
-    messages: [
-      {
-        role: "user",
-        content: [inputBlock, { type: "text", text: hintText }],
-      },
-    ],
-  });
+  // Use Opus 4.7 with extended thinking for maximum accuracy on dense
+  // engineering drawings. Sonnet 4.6 was faster but missed features.
+  // Extended thinking lets the model deliberate and self-check before
+  // emitting the structured tool call.
+  const tools: Anthropic.Messages.ToolUnion[] = [
+    {
+      name: "submit_drawing",
+      description: SUBMIT_DRAWING_TOOL_DESCRIPTION,
+      input_schema:
+        DRAWING_JSON_SCHEMA as unknown as Anthropic.Messages.Tool.InputSchema,
+      cache_control: { type: "ephemeral" },
+    },
+  ];
 
-  const toolUse = response.content.find(
+  const baseSystem: Anthropic.Messages.TextBlockParam[] = [
+    {
+      type: "text",
+      text: VISION_SYSTEM_PROMPT,
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+
+  const userContent: Anthropic.Messages.ContentBlockParam[] = [
+    inputBlock,
+    { type: "text", text: hintText },
+  ];
+
+  // First attempt: thinking enabled, tool_choice = auto (forced choice
+  // is incompatible with extended thinking). The strong system prompt
+  // tells the model to call submit_drawing.
+  let response: Anthropic.Messages.Message;
+  try {
+    response = await anthropic.messages.create({
+      model: "claude-opus-4-7",
+      max_tokens: 16_000,
+      thinking: { type: "enabled", budget_tokens: 5000 },
+      system: baseSystem,
+      tools,
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: userContent }],
+    });
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error: `Error llamando a Anthropic: ${(e as Error).message}`,
+      },
+      { status: 502 },
+    );
+  }
+
+  let toolUse = response.content.find(
     (block): block is Anthropic.Messages.ToolUseBlock =>
       block.type === "tool_use",
   );
+
+  // Fallback: if the model produced text but no tool_use, send a
+  // follow-up that forces the tool call (no thinking — forced choice
+  // is allowed without thinking).
+  if (!toolUse) {
+    try {
+      const followup = await anthropic.messages.create({
+        model: "claude-opus-4-7",
+        max_tokens: 8000,
+        system: baseSystem,
+        tools,
+        tool_choice: { type: "tool", name: "submit_drawing" },
+        messages: [
+          { role: "user", content: userContent },
+          {
+            role: "assistant",
+            content: response.content.filter(
+              (b): b is Anthropic.Messages.TextBlock => b.type === "text",
+            ),
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Ahora llama a submit_drawing con la lista COMPLETA de piezas, agujeros, slots y recortes — incluyendo todos los que enumeraste. No dejes ninguno fuera.",
+              },
+            ],
+          },
+        ],
+      });
+      toolUse = followup.content.find(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+      );
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error: `El modelo no llamó a submit_drawing y el fallback falló: ${(e as Error).message}`,
+          raw: response.content,
+        },
+        { status: 502 },
+      );
+    }
+  }
+
   if (!toolUse) {
     return NextResponse.json(
       {
         error:
-          "El modelo no devolvió una llamada a submit_drawing. Reintenta con otra foto.",
+          "El modelo no devolvió una llamada a submit_drawing. Reintenta con otra foto o un PDF más nítido.",
         raw: response.content,
       },
       { status: 502 },

@@ -64,9 +64,10 @@ const INITIAL_PROGRESS: Progress = {
     },
     analyze: {
       id: "analyze",
-      label: "Interpretar plano con IA",
+      label: "Interpretar plano con IA (Opus 4.7 + thinking)",
       state: "pending",
-      estimateRangeSec: [2, 7],
+      estimateRangeSec: [15, 60],
+      note: "Opus 4.7 con razonamiento extendido para enumerar TODO",
     },
     engine: {
       id: "engine",
