@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { DrawingZ, DRAWING_JSON_SCHEMA } from "@/lib/part-spec";
 import {
@@ -7,9 +7,10 @@ import {
 } from "@/lib/anthropic-prompt";
 
 export const runtime = "nodejs";
-// Extended thinking + tool use on a dense engineering drawing can take
-// a while; bump the function timeout accordingly.
-export const maxDuration = 120;
+// Vercel hobby caps Node functions at 60s of CPU but allows much
+// longer when the response is streamed. We stream Server-Sent Events
+// so the connection stays alive while Anthropic deliberates.
+export const maxDuration = 300;
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/webp" | "image/gif";
 type DocumentMediaType = "application/pdf";
@@ -26,27 +27,75 @@ type AnalyzeBody = {
   };
 };
 
+function sseResponse(
+  factory: (
+    send: (event: string, data: unknown) => void,
+  ) => Promise<void>,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: string, data: unknown) => {
+        controller.enqueue(
+          encoder.encode(
+            `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+          ),
+        );
+      };
+      const ka = setInterval(() => {
+        // SSE comment line: ignored by clients but keeps the TCP
+        // connection alive past Vercel's idle-cut threshold.
+        try {
+          controller.enqueue(encoder.encode(`: keepalive ${Date.now()}\n\n`));
+        } catch {
+          /* controller closed */
+        }
+      }, 10_000);
+      try {
+        await factory(send);
+      } catch (e) {
+        send("error", { error: (e as Error).message });
+      } finally {
+        clearInterval(ka);
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no",
+      connection: "keep-alive",
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY no configurada en el servidor." },
-      { status: 500 },
-    );
+    return sseResponse(async (send) => {
+      send("error", { error: "ANTHROPIC_API_KEY no configurada en el servidor." });
+    });
   }
 
   let body: AnalyzeBody;
   try {
     body = (await req.json()) as AnalyzeBody;
   } catch {
-    return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
+    return sseResponse(async (send) => {
+      send("error", { error: "JSON inválido." });
+    });
   }
 
   if (!body.image_base64 || !body.media_type) {
-    return NextResponse.json(
-      { error: "Faltan campos image_base64 y media_type." },
-      { status: 400 },
-    );
+    return sseResponse(async (send) => {
+      send("error", { error: "Faltan campos image_base64 y media_type." });
+    });
   }
 
   const anthropic = new Anthropic({ apiKey });
@@ -94,10 +143,6 @@ export async function POST(req: NextRequest) {
         },
       };
 
-  // Use Opus 4.7 with extended thinking for maximum accuracy on dense
-  // engineering drawings. Sonnet 4.6 was faster but missed features.
-  // Extended thinking lets the model deliberate and self-check before
-  // emitting the structured tool call.
   const tools: Anthropic.Messages.ToolUnion[] = [
     {
       name: "submit_drawing",
@@ -121,108 +166,96 @@ export async function POST(req: NextRequest) {
     { type: "text", text: hintText },
   ];
 
-  // First attempt: thinking enabled, tool_choice = auto (forced choice
-  // is incompatible with extended thinking). The strong system prompt
-  // tells the model to call submit_drawing.
-  let response: Anthropic.Messages.Message;
-  try {
-    response = await anthropic.messages.create({
-      model: "claude-opus-4-7",
-      max_tokens: 16_000,
-      // Opus 4.7 uses adaptive thinking + output_config.effort instead
-      // of the old budget_tokens shape. "high" pushes the model to do
-      // deep deliberation on dense engineering plans.
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
-      system: baseSystem,
-      tools,
-      tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: userContent }],
-    });
-  } catch (e) {
-    return NextResponse.json(
-      {
-        error: `Error llamando a Anthropic: ${(e as Error).message}`,
-      },
-      { status: 502 },
-    );
-  }
+  return sseResponse(async (send) => {
+    send("stage", { stage: "calling_claude" });
 
-  let toolUse = response.content.find(
-    (block): block is Anthropic.Messages.ToolUseBlock =>
-      block.type === "tool_use",
-  );
-
-  // Fallback: if the model produced text but no tool_use, send a
-  // follow-up that forces the tool call (no thinking — forced choice
-  // is allowed without thinking).
-  if (!toolUse) {
+    let response: Anthropic.Messages.Message;
     try {
-      const followup = await anthropic.messages.create({
+      response = await anthropic.messages.create({
         model: "claude-opus-4-7",
-        max_tokens: 8000,
+        max_tokens: 16_000,
+        // Adaptive thinking + medium effort: high quality without
+        // blowing past the Vercel timeout. Operator can re-run a
+        // tougher plan with the manual editor if needed.
+        thinking: { type: "adaptive" },
+        output_config: { effort: "medium" },
         system: baseSystem,
         tools,
-        tool_choice: { type: "tool", name: "submit_drawing" },
-        messages: [
-          { role: "user", content: userContent },
-          {
-            role: "assistant",
-            content: response.content.filter(
-              (b): b is Anthropic.Messages.TextBlock => b.type === "text",
-            ),
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Ahora llama a submit_drawing con la lista COMPLETA de piezas, agujeros, slots y recortes — incluyendo todos los que enumeraste. No dejes ninguno fuera.",
-              },
-            ],
-          },
-        ],
+        tool_choice: { type: "auto" },
+        messages: [{ role: "user", content: userContent }],
       });
-      toolUse = followup.content.find(
-        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
-      );
     } catch (e) {
-      return NextResponse.json(
-        {
-          error: `El modelo no llamó a submit_drawing y el fallback falló: ${(e as Error).message}`,
-          raw: response.content,
-        },
-        { status: 502 },
-      );
+      send("error", {
+        error: `Error llamando a Anthropic: ${(e as Error).message}`,
+      });
+      return;
     }
-  }
 
-  if (!toolUse) {
-    return NextResponse.json(
-      {
+    let toolUse = response.content.find(
+      (block): block is Anthropic.Messages.ToolUseBlock =>
+        block.type === "tool_use",
+    );
+
+    if (!toolUse) {
+      send("stage", { stage: "fallback_force_tool" });
+      try {
+        const followup = await anthropic.messages.create({
+          model: "claude-opus-4-7",
+          max_tokens: 8000,
+          system: baseSystem,
+          tools,
+          tool_choice: { type: "tool", name: "submit_drawing" },
+          messages: [
+            { role: "user", content: userContent },
+            {
+              role: "assistant",
+              content: response.content.filter(
+                (b): b is Anthropic.Messages.TextBlock => b.type === "text",
+              ),
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Ahora llama a submit_drawing con la lista COMPLETA de piezas, agujeros, slots y recortes — incluyendo todos los que enumeraste. No dejes ninguno fuera.",
+                },
+              ],
+            },
+          ],
+        });
+        toolUse = followup.content.find(
+          (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+        );
+      } catch (e) {
+        send("error", {
+          error: `El modelo no llamó a submit_drawing y el fallback falló: ${(e as Error).message}`,
+        });
+        return;
+      }
+    }
+
+    if (!toolUse) {
+      send("error", {
         error:
           "El modelo no devolvió una llamada a submit_drawing. Reintenta con otra foto o un PDF más nítido.",
-        raw: response.content,
-      },
-      { status: 502 },
-    );
-  }
+      });
+      return;
+    }
 
-  const parsed = DrawingZ.safeParse(toolUse.input);
-  if (!parsed.success) {
-    return NextResponse.json(
-      {
+    const parsed = DrawingZ.safeParse(toolUse.input);
+    if (!parsed.success) {
+      send("error", {
         error:
           "La interpretación del plano no cumple el esquema. Prueba con una foto más nítida.",
         issues: parsed.error.issues,
-        raw: toolUse.input,
-      },
-      { status: 422 },
-    );
-  }
+      });
+      return;
+    }
 
-  return NextResponse.json({
-    drawing: parsed.data,
-    usage: response.usage,
+    send("done", {
+      drawing: parsed.data,
+      usage: response.usage,
+    });
   });
 }

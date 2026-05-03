@@ -250,11 +250,17 @@ export default function SketchToStep() {
             },
           }),
         });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error(j.error ?? `Error ${res.status}`);
+        if (!res.ok || !res.body) {
+          throw new Error(`Error ${res.status}`);
         }
-        const { drawing: raw } = (await res.json()) as { drawing: Drawing };
+        const sseResult = await readSSEDrawing(res, (note) =>
+          setProgress((p) =>
+            updateStep(p, "analyze", { state: "active", note }),
+          ),
+        );
+        if (sseResult.error) throw new Error(sseResult.error);
+        if (!sseResult.drawing) throw new Error("Sin respuesta del análisis.");
+        const raw = sseResult.drawing as Drawing;
         const d = applyClientHints(raw, hints);
         setDrawing(d);
         const missingCount = d.missing_fields?.length ?? 0;
@@ -635,6 +641,53 @@ function pletinaToFakeAngle(p: PartSpec): PartSpec {
       ends: fb.ends,
     },
   };
+}
+
+// Reads a Server-Sent Events response from /api/analyze and returns
+// the final drawing or an error. Calls onStage with progress notes.
+async function readSSEDrawing(
+  res: Response,
+  onStage: (note: string) => void,
+): Promise<{ drawing?: unknown; error?: string }> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: { drawing?: unknown; error?: string } = {};
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+    for (const ev of events) {
+      // Lines starting with ":" are SSE comments (keepalives) — skip.
+      const lines = ev.split("\n").filter((l) => !l.startsWith(":"));
+      let eventName = "message";
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLine = line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+      let data: unknown;
+      try {
+        data = JSON.parse(dataLine);
+      } catch {
+        continue;
+      }
+      if (eventName === "stage") {
+        const stage = (data as { stage?: string }).stage;
+        if (stage === "calling_claude") onStage("Razonando con Opus 4.7…");
+        if (stage === "fallback_force_tool")
+          onStage("Reintentando para forzar el tool…");
+      } else if (eventName === "done") {
+        result = { drawing: (data as { drawing: unknown }).drawing };
+      } else if (eventName === "error") {
+        result = { error: (data as { error: string }).error };
+      }
+    }
+  }
+  return result;
 }
 
 function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
