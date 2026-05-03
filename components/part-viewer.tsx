@@ -85,15 +85,15 @@ function ViewerInner({
           far: diag * 50,
         }}
       >
-        <color attach="background" args={["#0b0f14"]} />
-        <ambientLight intensity={0.5} />
+        <color attach="background" args={["#d8ecd6"]} />
+        <ambientLight intensity={0.7} />
         <directionalLight
           position={[size.x * 2, size.y * 4, size.z * 4]}
-          intensity={1.0}
+          intensity={1.6}
         />
         <directionalLight
           position={[-size.x, -size.y, size.z]}
-          intensity={0.35}
+          intensity={0.6}
         />
         <Suspense fallback={null}>
           <PartGeometry mesh={mesh} />
@@ -103,8 +103,8 @@ function ViewerInner({
           args={[diag * 4, diag * 4]}
           cellSize={Math.max(diag / 40, 1)}
           sectionSize={Math.max(diag / 4, 10)}
-          sectionColor="#1f2a36"
-          cellColor="#121820"
+          sectionColor="#5a8a5a"
+          cellColor="#a8c9a8"
           fadeDistance={diag * 4}
           position={[center.x, center.y - size.y * 0.6, center.z]}
           infiniteGrid
@@ -127,11 +127,11 @@ function ViewerInner({
       <button
         type="button"
         onClick={() => setResetTick((t) => t + 1)}
-        className="absolute right-2 top-2 z-10 rounded border border-bodor-line bg-bodor-bg/85 px-2.5 py-1.5 text-[11px] text-bodor-text hover:border-bodor-accent/60"
+        className="absolute right-2 top-2 z-10 rounded border border-bodor-bg/30 bg-white/90 px-2.5 py-1.5 text-[11px] font-semibold text-bodor-bg shadow hover:bg-white"
       >
         Encajar vista
       </button>
-      <div className="pointer-events-none absolute bottom-2 left-2 z-10 rounded border border-bodor-line bg-bodor-bg/80 px-2 py-1 text-[10px] text-bodor-muted">
+      <div className="pointer-events-none absolute bottom-2 left-2 z-10 rounded border border-bodor-bg/30 bg-white/90 px-2 py-1 text-[10px] text-bodor-bg shadow">
         ● rojo = agujero · ● naranja = slot · ● violeta = recorte
       </div>
     </div>
@@ -150,7 +150,13 @@ function PartGeometry({ mesh }: { mesh: PartMesh }) {
 
   return (
     <mesh geometry={geometry}>
-      <meshStandardMaterial color="#c0c8d0" metalness={0.8} roughness={0.35} />
+      {/* Dark blue-steel against the light green background gives high
+          contrast and makes holes / slots / cutouts pop. */}
+      <meshStandardMaterial
+        color="#3a4a5e"
+        metalness={0.55}
+        roughness={0.45}
+      />
     </mesh>
   );
 }
@@ -209,25 +215,26 @@ function FeatureMarkers({ markers }: { markers: FeatureMarker[] }) {
             <div
               title={m.label}
               style={{
-                width: 10,
-                height: 10,
+                width: 11,
+                height: 11,
                 borderRadius: "50%",
                 background: COLOR[m.kind],
-                border: "1.5px solid white",
-                boxShadow: "0 0 4px rgba(0,0,0,0.7)",
+                border: "1.5px solid #0b0f14",
+                boxShadow: "0 0 6px rgba(0,0,0,0.4)",
               }}
             />
             <div
               style={{
-                fontSize: 9,
+                fontSize: 10,
                 fontFamily:
                   "ui-monospace, SFMono-Regular, Menlo, monospace",
-                color: "white",
-                background: "rgba(11, 15, 20, 0.85)",
-                padding: "1px 4px",
+                color: "#0b0f14",
+                background: "rgba(255, 255, 255, 0.95)",
+                padding: "1px 5px",
                 borderRadius: 3,
                 whiteSpace: "nowrap",
-                border: `1px solid ${COLOR[m.kind]}`,
+                border: `1.5px solid ${COLOR[m.kind]}`,
+                fontWeight: 600,
               }}
             >
               {m.label}
