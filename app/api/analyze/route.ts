@@ -129,7 +129,11 @@ export async function POST(req: NextRequest) {
     response = await anthropic.messages.create({
       model: "claude-opus-4-7",
       max_tokens: 16_000,
-      thinking: { type: "enabled", budget_tokens: 5000 },
+      // Opus 4.7 uses adaptive thinking + output_config.effort instead
+      // of the old budget_tokens shape. "high" pushes the model to do
+      // deep deliberation on dense engineering plans.
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
       system: baseSystem,
       tools,
       tool_choice: { type: "auto" },
