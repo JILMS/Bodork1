@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type {
   Cutout,
   Drawing,
@@ -158,6 +158,8 @@ export function PartEditor({
 
   const totalMissing = drawing.missing_fields.length;
 
+  const [compact, setCompact] = useState(true);
+
   const updatePart = (i: number, patch: PartSpec) => {
     onChange({
       ...drawing,
@@ -168,26 +170,236 @@ export function PartEditor({
   return (
     <div className="flex flex-col gap-3">
       <div
-        className={`rounded-md border px-3 py-2 text-[11px] ${
+        className={`rounded-lg border px-3 py-2.5 text-xs ${
           totalMissing > 0
-            ? "border-amber-400/50 bg-amber-400/10 text-amber-200"
+            ? "border-amber-400/60 bg-amber-400/10 text-amber-200"
             : "border-emerald-500/40 bg-emerald-500/5 text-emerald-300"
         }`}
       >
         {totalMissing > 0 ? (
           <>
-            <strong>Revisa {totalMissing} dato{totalMissing === 1 ? "" : "s"}:</strong>{" "}
-            la IA no los ha leído con seguridad. Confirma o corrige los
-            valores en ámbar y después pulsa <em>Construir 3D</em>.
+            <strong>Confirma {totalMissing} dato{totalMissing === 1 ? "" : "s"}</strong>{" "}
+            que la IA no ha leído con seguridad. El resto está listo.
           </>
         ) : (
           <>
-            <strong>Todo claro.</strong> Revisa cotas y agujeros, añade los
-            que falten, y pulsa <em>Construir 3D</em>.
+            <strong>Plano leído correctamente.</strong>{" "}
+            Pulsa <em>Construir 3D</em> para generar la pieza.
           </>
         )}
       </div>
 
+      {compact
+        ? renderCompact({ drawing, missingByPart, onChange })
+        : renderFull({
+            drawing,
+            missingByPart,
+            onChange,
+            updatePart,
+          })}
+
+      <button
+        type="button"
+        onClick={onBuild}
+        disabled={!canBuild || isBuilding}
+        className="h-12 rounded bg-bodor-accent px-4 text-sm font-bold uppercase tracking-wider text-bodor-bg transition-colors hover:bg-bodor-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {isBuilding ? "Construyendo…" : "Construir 3D"}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setCompact((c) => !c)}
+        className="self-end text-[11px] text-bodor-muted underline-offset-2 hover:text-bodor-text hover:underline"
+      >
+        {compact ? "▾ Editar a mano (avanzado)" : "▴ Vista resumida"}
+      </button>
+    </div>
+  );
+}
+
+// Compact view: only a summary card per part + inputs for the fields
+// the AI flagged as uncertain. The operator doesn't have to verify
+// every single dimension, only the ones with a question mark.
+function renderCompact({
+  drawing,
+  missingByPart,
+  onChange,
+}: {
+  drawing: Drawing;
+  missingByPart: Map<number, MissingField[]>;
+  onChange: (d: Drawing) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {drawing.parts.map((p, i) => {
+        const missing = missingByPart.get(i) ?? [];
+        return (
+          <div
+            key={i}
+            className="rounded-lg border border-bodor-line bg-bodor-panel/40 p-3"
+          >
+            <div className="mb-1 flex items-baseline justify-between gap-2">
+              <span className="truncate text-sm font-semibold text-bodor-text">
+                {p.name ?? `Pieza ${i + 1}`}
+              </span>
+              <span className="shrink-0 text-[11px] text-bodor-muted">
+                {p.quantity} uds · {p.material.replace("_", " ")}
+              </span>
+            </div>
+            <div className="mb-2 text-[11px] text-bodor-muted">
+              {summaryLine(p)}
+            </div>
+            <FeatureBadges p={p} />
+
+            {missing.length > 0 && (
+              <div className="mt-3 flex flex-col gap-2 rounded border border-amber-400/40 bg-amber-400/5 p-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                  Datos a confirmar
+                </div>
+                {missing.map((mf) => (
+                  <MissingInput
+                    key={mf.field_path}
+                    drawing={drawing}
+                    partIndex={i}
+                    mf={mf}
+                    onChange={onChange}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function summaryLine(p: PartSpec): string {
+  const pr = p.profile;
+  switch (pr.kind) {
+    case "flat_bar":
+      return `Pletina ${pr.width_mm}×${pr.thickness_mm} × ${pr.length_mm} mm`;
+    case "round_tube":
+      return `Tubo Ø${pr.outer_diameter_mm}×${pr.wall_thickness_mm} × ${pr.length_mm} mm`;
+    case "square_tube":
+      return `Tubo cuadrado ${pr.side_mm}×${pr.wall_thickness_mm} × ${pr.length_mm} mm`;
+    case "rectangular_tube":
+      return `Tubo rectangular ${pr.width_mm}×${pr.height_mm}×${pr.wall_thickness_mm} × ${pr.length_mm} mm`;
+    case "angle_profile":
+      return `Perfil L ${pr.leg_a_mm}×${pr.leg_b_mm}×${pr.thickness_mm} × ${pr.length_mm} mm`;
+  }
+}
+
+function FeatureBadges({ p }: { p: PartSpec }) {
+  const pr = p.profile;
+  const items: Array<{ label: string; color: string; n: number }> = [];
+  if (pr.kind === "flat_bar" || pr.kind === "angle_profile") {
+    items.push({
+      label: "agujeros",
+      color: "bg-red-500/20 text-red-200 border-red-400/40",
+      n: pr.holes.length,
+    });
+    items.push({
+      label: "slots",
+      color: "bg-orange-500/20 text-orange-200 border-orange-400/40",
+      n: pr.slots.length,
+    });
+    items.push({
+      label: "recortes",
+      color: "bg-violet-500/20 text-violet-200 border-violet-400/40",
+      n: pr.cutouts.length,
+    });
+  } else if (
+    pr.kind === "round_tube" ||
+    pr.kind === "square_tube" ||
+    pr.kind === "rectangular_tube"
+  ) {
+    items.push({
+      label: "agujeros",
+      color: "bg-red-500/20 text-red-200 border-red-400/40",
+      n: pr.holes.length,
+    });
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((it) => (
+        <span
+          key={it.label}
+          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${it.color}`}
+        >
+          {it.n} {it.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function MissingInput({
+  drawing,
+  partIndex,
+  mf,
+  onChange,
+}: {
+  drawing: Drawing;
+  partIndex: number;
+  mf: MissingField;
+  onChange: (d: Drawing) => void;
+}) {
+  const part = drawing.parts[partIndex];
+  const current = readPath(part, mf.field_path);
+  return (
+    <label className="flex flex-col gap-0.5 text-[11px]">
+      <span className="text-amber-200">
+        {mf.label}
+        {mf.reason ? ` · ${mf.reason}` : ""}
+      </span>
+      <input
+        type="number"
+        inputMode="decimal"
+        step="0.5"
+        value={
+          typeof current === "number"
+            ? current
+            : typeof mf.current_value === "number"
+              ? mf.current_value
+              : ""
+        }
+        placeholder="mm"
+        onChange={(e) => {
+          const v = parseFloat(e.target.value);
+          const next = Number.isFinite(v) ? v : 0;
+          const newPart = writePath(part, mf.field_path, next);
+          onChange({
+            ...drawing,
+            parts: drawing.parts.map((pp, idx) =>
+              idx === partIndex ? newPart : pp,
+            ),
+            missing_fields: drawing.missing_fields.filter(
+              (m) =>
+                !(m.part_index === partIndex && m.field_path === mf.field_path),
+            ),
+          });
+        }}
+        className="h-10 rounded border border-amber-400/70 bg-amber-400/5 px-2 text-sm text-bodor-text"
+      />
+    </label>
+  );
+}
+
+function renderFull({
+  drawing,
+  missingByPart,
+  onChange,
+  updatePart,
+}: {
+  drawing: Drawing;
+  missingByPart: Map<number, MissingField[]>;
+  onChange: (d: Drawing) => void;
+  updatePart: (i: number, patch: PartSpec) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
       {drawing.parts.map((p, i) => {
         const missing = missingByPart.get(i) ?? [];
         const missingPaths = new Set(missing.map((m) => m.field_path));
@@ -440,15 +652,6 @@ export function PartEditor({
           </details>
         );
       })}
-
-      <button
-        type="button"
-        onClick={onBuild}
-        disabled={!canBuild || isBuilding}
-        className="h-11 rounded bg-bodor-accent px-4 text-sm font-semibold text-bodor-bg transition-colors hover:bg-bodor-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {isBuilding ? "Construyendo…" : "Construir 3D"}
-      </button>
     </div>
   );
 }
