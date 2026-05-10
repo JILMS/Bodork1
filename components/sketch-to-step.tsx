@@ -444,19 +444,35 @@ export default function SketchToStep() {
       phase === "building");
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-6xl flex-col gap-4 p-3 sm:p-5 lg:p-6">
-      <header className="flex flex-wrap items-end justify-between gap-2 border-b border-bodor-line pb-3">
-        <div>
-          <h1 className="text-lg font-semibold sm:text-xl">
-            Bodor Sketch → STEP
-          </h1>
-          <p className="text-[11px] text-bodor-muted sm:text-xs">
-            Foto o PDF del plano → sólido B-Rep estanco → archivo STEP/STL
-            para la K1.{" "}
-            <span className="text-bodor-accent">
-              La Bodor K1 empieza a cortar por el extremo izquierdo (X=0).
-            </span>
-          </p>
+    <main className="mx-auto flex min-h-[100dvh] max-w-6xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-bodor-line pb-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-bodor-accent text-bodor-bg shadow-md">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-5 w-5"
+            >
+              <path d="M3 7l9-4 9 4-9 4-9-4z" />
+              <path d="M3 7v10l9 4 9-4V7" />
+              <path d="M12 11v10" />
+            </svg>
+          </span>
+          <div>
+            <h1 className="text-base font-semibold leading-tight sm:text-lg">
+              Sketch → STEP
+              <span className="ml-2 text-xs font-normal text-bodor-muted">
+                · Bodor K1
+              </span>
+            </h1>
+            <p className="text-[11px] text-bodor-muted">
+              Plano → sólido 3D → STEP / STL listo para la K1
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <EngineBadge status={engine} />
@@ -680,6 +696,8 @@ async function readSSEDrawing(
         if (stage === "calling_claude") onStage("Razonando con Opus 4.7…");
         if (stage === "fallback_force_tool")
           onStage("Reintentando para forzar el tool…");
+        if (stage === "verifying")
+          onStage("Verificando con un 2º modelo…");
       } else if (eventName === "done") {
         result = { drawing: (data as { drawing: unknown }).drawing };
       } else if (eventName === "error") {

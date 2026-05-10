@@ -44,36 +44,38 @@ export function Dropzone({ onFile, disabled }: Props) {
   return (
     <div
       {...getRootProps()}
-      className={`flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
+      className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-6 text-center transition-all ${
         disabled
           ? "cursor-not-allowed border-bodor-line opacity-50"
           : isDragActive
-            ? "border-bodor-accent bg-bodor-accent/10"
-            : "border-bodor-line"
+            ? "scale-[1.01] border-bodor-accent bg-bodor-accent/10"
+            : "border-bodor-line bg-bodor-panel/30"
       }`}
     >
       <input {...getInputProps()} />
 
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="h-7 w-7 text-bodor-muted"
-        aria-hidden
-      >
-        <path d="M12 3v12" />
-        <path d="M7 8l5-5 5 5" />
-        <rect x="3" y="15" width="18" height="6" rx="1.5" />
-      </svg>
+      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-bodor-accent/15 text-bodor-accent">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-6 w-6"
+          aria-hidden
+        >
+          <path d="M12 3v12" />
+          <path d="M7 8l5-5 5 5" />
+          <rect x="3" y="15" width="18" height="6" rx="1.5" />
+        </svg>
+      </span>
 
-      <p className="text-sm text-bodor-text">
+      <p className="text-base font-semibold text-bodor-text">
         {isDragActive ? "Suelta aquí…" : "Subir plano"}
       </p>
       <p className="text-[11px] text-bodor-muted">
-        Imagen (JPG / PNG / WEBP) o PDF · también puedes arrastrar
+        Foto, JPG / PNG / WEBP o PDF · también arrástralo aquí
       </p>
 
       <div className="grid w-full grid-cols-2 gap-2 pt-1">
@@ -84,7 +86,7 @@ export function Dropzone({ onFile, disabled }: Props) {
             e.stopPropagation();
             cameraRef.current?.click();
           }}
-          className="flex h-11 items-center justify-center gap-2 rounded bg-bodor-accent px-3 text-sm font-semibold text-bodor-bg transition-colors hover:bg-bodor-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-12 items-center justify-center gap-2 rounded-lg bg-bodor-accent px-3 text-sm font-semibold text-bodor-bg shadow-sm transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <CameraIcon />
           Hacer foto
@@ -96,7 +98,7 @@ export function Dropzone({ onFile, disabled }: Props) {
             e.stopPropagation();
             fileRef.current?.click();
           }}
-          className="flex h-11 items-center justify-center gap-2 rounded border border-bodor-line bg-bodor-panel px-3 text-sm font-semibold text-bodor-text transition-colors hover:border-bodor-accent/60 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-12 items-center justify-center gap-2 rounded-lg border border-bodor-line bg-bodor-bg px-3 text-sm font-semibold text-bodor-text transition-colors hover:border-bodor-accent/60 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <FileIcon />
           Subir archivo

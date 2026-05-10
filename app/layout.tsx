@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: "Bodor Sketch → STEP",
@@ -12,7 +20,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#0b0f14",
+  themeColor: "#0e131a",
 };
 
 export default function RootLayout({
@@ -21,8 +29,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="es">
-      <body className="min-h-[100dvh] bg-bodor-bg font-mono text-bodor-text antialiased">
+    <html lang="es" className={inter.variable}>
+      <body className="min-h-[100dvh] bg-bodor-bg font-sans text-bodor-text antialiased">
         {children}
       </body>
     </html>

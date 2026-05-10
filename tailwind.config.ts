@@ -1,24 +1,44 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  content: [
-    "./app/**/*.{ts,tsx}",
-    "./components/**/*.{ts,tsx}",
-  ],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
         bodor: {
-          bg: "#0b0f14",
-          panel: "#121820",
-          accent: "#ff6b1a",
-          line: "#1f2a36",
-          text: "#e6edf3",
-          muted: "#8b96a3",
+          // Slightly lifted palette: still dark but readable, with
+          // higher-contrast text and a warmer accent.
+          bg: "#0e131a",
+          panel: "#161e2a",
+          accent: "#ff7a2c",
+          line: "#27313f",
+          text: "#f1f5f9",
+          muted: "#94a3b8",
+          good: "#34d399",
+          warn: "#fbbf24",
+          bad: "#f87171",
         },
       },
       fontFamily: {
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        sans: [
+          "Inter",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "Roboto",
+          "sans-serif",
+        ],
+        mono: [
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Consolas",
+          "monospace",
+        ],
+      },
+      borderRadius: {
+        lg: "0.6rem",
       },
     },
   },

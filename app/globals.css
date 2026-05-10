@@ -4,10 +4,23 @@
 
 html,
 body {
-  background: #0b0f14;
-  color: #e6edf3;
+  background: #0e131a;
+  color: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
 }
 
 canvas {
   touch-action: none;
+}
+
+/* Utility for the shape number / dimension chips so they read well. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Smooth focus ring for keyboard nav. */
+*:focus-visible {
+  outline: 2px solid #ff7a2c;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
