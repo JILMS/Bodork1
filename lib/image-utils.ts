@@ -103,7 +103,7 @@ function makeCanvas(srcW: number, srcH: number): {
   w: number;
   h: number;
 } {
-  const maxSide = 1600;
+  const maxSide = 1280;
   const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
   const w = Math.max(1, Math.round(srcW * scale));
   const h = Math.max(1, Math.round(srcH * scale));

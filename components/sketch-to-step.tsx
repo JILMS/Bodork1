@@ -12,6 +12,7 @@ import {
   type StepId,
   type StepInfo,
 } from "@/components/progress-stepper";
+import { OverallProgress } from "@/components/overall-progress";
 import { fileToUploadPayload } from "@/lib/image-utils";
 import type { Drawing, PartSpec } from "@/lib/part-spec";
 import type { Mesh } from "@/lib/occ/mesh-from-shape";
@@ -443,145 +444,197 @@ export default function SketchToStep() {
       phase === "ready" ||
       phase === "building");
 
+  const stepsForOverall: StepInfo[] =
+    !drawing && engine !== "ready" ? [preloadStep] : stepsArray;
+
+  const overallLabel =
+    phase === "ready"
+      ? "Listo"
+      : phase === "error"
+        ? "Error"
+        : phase === "building"
+          ? "3D"
+          : phase === "analyzing"
+            ? "IA"
+            : engine === "loading"
+              ? "CAD"
+              : "—";
+
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-6xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-bodor-line pb-4">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-bodor-accent text-bodor-bg shadow-md">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-5 w-5"
-            >
-              <path d="M3 7l9-4 9 4-9 4-9-4z" />
-              <path d="M3 7v10l9 4 9-4V7" />
-              <path d="M12 11v10" />
-            </svg>
-          </span>
-          <div>
-            <h1 className="text-base font-semibold leading-tight sm:text-lg">
-              Sketch → STEP
-              <span className="ml-2 text-xs font-normal text-bodor-muted">
-                · Bodor K1
-              </span>
-            </h1>
-            <p className="text-[11px] text-bodor-muted">
-              Plano → sólido 3D → STEP / STL listo para la K1
-            </p>
+    <main className="min-h-[100dvh] bg-bodor-bg">
+      {/* Top bar */}
+      <header className="sticky top-0 z-20 border-b border-bodor-line bg-bodor-bg/85 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-bodor-accent to-orange-600 text-bodor-bg shadow-md">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+              >
+                <path d="M3 7l9-4 9 4-9 4-9-4z" />
+                <path d="M3 7v10l9 4 9-4V7" />
+                <path d="M12 11v10" />
+              </svg>
+            </span>
+            <div className="leading-tight">
+              <h1 className="text-sm font-semibold sm:text-base">
+                Sketch → STEP
+              </h1>
+              <p className="text-[10px] text-bodor-muted">
+                Bodor K1 · plano → 3D
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <EngineBadge status={engine} />
-          <PhaseBadge phase={phase} />
+          <div className="flex items-center gap-3">
+            <EngineBadge status={engine} />
+            <PhaseBadge phase={phase} />
+          </div>
         </div>
       </header>
 
-      <div className="grid flex-1 gap-4 lg:grid-cols-[360px_1fr]">
-        <aside className="flex flex-col gap-4">
-          <Dropzone onFile={handleFile} disabled={isWorking} />
-          <MaterialForm value={hints} onChange={setHints} />
+      <div className="mx-auto grid max-w-7xl gap-4 p-4 sm:p-6 lg:grid-cols-[380px_1fr] lg:gap-5">
+        {/* Sidebar — stacked action cards */}
+        <aside className="flex flex-col gap-3">
+          {/* Card 1: Upload */}
+          <Card title="1 · Subir plano">
+            <Dropzone onFile={handleFile} disabled={isWorking} />
+          </Card>
 
-          {!drawing && engine !== "ready" && (
-            <div className="rounded-lg border border-bodor-line bg-bodor-panel/60 p-3">
-              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-bodor-muted">
-                Motor CAD (precarga)
-              </h2>
-              <ProgressStepper steps={[preloadStep]} />
-              <p className="mt-2 text-[10px] text-bodor-muted">
-                Se descarga ~15 MB de WebAssembly la primera vez. Después
-                queda cacheado y este paso es instantáneo.
-              </p>
-            </div>
+          {/* Card 2: Progress (always visible after any activity) */}
+          {(isWorking ||
+            phase === "ready" ||
+            phase === "error" ||
+            (!drawing && engine !== "ready")) && (
+            <Card title="2 · Progreso">
+              <OverallProgress
+                steps={stepsForOverall}
+                centerLabel={overallLabel}
+              />
+              <details className="mt-2">
+                <summary className="cursor-pointer select-none text-[10px] text-bodor-muted hover:text-bodor-text">
+                  Detalles por fase
+                </summary>
+                <div className="mt-2">
+                  <ProgressStepper steps={stepsForOverall} />
+                </div>
+              </details>
+              {!drawing && engine !== "ready" && (
+                <p className="mt-2 text-[10px] text-bodor-muted">
+                  Se descarga ~15 MB de WebAssembly la primera vez. Después
+                  queda cacheado.
+                </p>
+              )}
+            </Card>
           )}
 
-          {(isWorking || phase === "ready" || phase === "error") && (
-            <div className="rounded-lg border border-bodor-line bg-bodor-panel/60 p-3">
-              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-bodor-muted">
-                Progreso
-              </h2>
-              <ProgressStepper steps={stepsArray} />
-            </div>
-          )}
+          {/* Card 3: Material / espesor fallback */}
+          <Card
+            title="Material / espesor"
+            subtitle="Si no aparecen en el plano"
+          >
+            <MaterialForm value={hints} onChange={setHints} />
+          </Card>
 
+          {/* Card 4: Detected parts + editor */}
           {drawing && (
-            <>
+            <Card title="3 · Piezas detectadas">
               <PartsList
                 drawing={drawing}
                 selected={selected}
                 onSelect={setSelected}
               />
               {drawing.parts.some((p) => p.profile.kind === "flat_bar") && (
-                <div className="rounded border border-bodor-accent/40 bg-bodor-accent/5 px-3 py-2 text-[11px] text-bodor-accent">
+                <div className="mt-2 rounded border border-bodor-accent/40 bg-bodor-accent/5 px-3 py-2 text-[11px] text-bodor-accent">
                   Las pletinas se exportarán como falso ángulo en L
-                  (leg ≈ {FAKE_LEG_B_MM} mm) para que el CAM de la K1 las
-                  acepte. La cara con los agujeros será la del ala marcada
-                  en el plano. Cantidad enviada: 1.
+                  (leg ≈ {FAKE_LEG_B_MM} mm). qty = 1 por defecto.
                 </div>
               )}
-            </>
+              {showEditor && (
+                <div className="mt-3">
+                  <PartEditor
+                    drawing={drawing}
+                    onChange={setDrawing}
+                    onBuild={handleBuild}
+                    canBuild={engine === "ready"}
+                    isBuilding={phase === "building"}
+                  />
+                </div>
+              )}
+            </Card>
           )}
 
-          {showEditor && drawing && (
-            <PartEditor
-              drawing={drawing}
-              onChange={setDrawing}
-              onBuild={handleBuild}
-              canBuild={engine === "ready"}
-              isBuilding={phase === "building"}
-            />
-          )}
-
+          {/* Card 5: Save */}
           {currentResult && (
-            <div className="flex flex-col gap-2">
+            <Card title="4 · Guardar">
               <div
-                className={`text-xs ${
+                className={`mb-2 text-xs ${
                   currentResult.watertight
-                    ? "text-emerald-400"
-                    : "text-amber-400"
+                    ? "text-bodor-good"
+                    : "text-bodor-warn"
                 }`}
               >
                 {currentResult.watertight
-                  ? "Sólido estanco ✓"
-                  : "Atención: el sólido podría no ser estanco."}
+                  ? "✓ Sólido estanco, listo para la K1"
+                  : "⚠ Posible no-estanco — revisa antes de cortar"}
               </div>
               <button
                 type="button"
                 onClick={() => setSaveOpen(true)}
-                className="h-11 w-full rounded bg-bodor-accent px-4 text-sm font-semibold text-bodor-bg transition-colors hover:bg-bodor-accent/90"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-bodor-accent to-orange-600 px-4 text-sm font-bold uppercase tracking-wider text-bodor-bg shadow-md transition-all hover:brightness-110"
               >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
                 Guardar archivo
               </button>
-            </div>
+            </Card>
           )}
 
           {error && (
-            <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
+            <div className="rounded-lg border border-bodor-bad/50 bg-bodor-bad/10 p-3 text-xs text-bodor-bad">
               {error}
             </div>
           )}
         </aside>
 
-        <section className="relative h-[55vh] min-h-[320px] overflow-hidden rounded-lg border border-bodor-line bg-bodor-panel lg:h-auto">
+        {/* Main viewer panel */}
+        <section className="relative h-[55vh] min-h-[360px] overflow-hidden rounded-2xl border border-bodor-line bg-bodor-panel shadow-xl lg:h-[calc(100dvh-160px)] lg:min-h-0">
           <PartViewer
             mesh={currentResult?.mesh ?? null}
             spec={currentResult?.builtSpec}
           />
           {!currentResult && drawing && phase === "awaiting_review" && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 text-center text-[11px] text-bodor-muted">
-              Revisa las cotas a la izquierda y pulsa <em>Construir 3D</em>
-              <br />para ver aquí el sólido.
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 text-center text-xs text-bodor-muted">
+              <div className="rounded-xl bg-bodor-bg/85 px-5 py-4 backdrop-blur-md">
+                Revisa las piezas a la izquierda y pulsa
+                <br />
+                <em className="font-semibold text-bodor-accent">
+                  Construir 3D
+                </em>{" "}
+                para ver aquí el sólido.
+              </div>
             </div>
           )}
         </section>
       </div>
 
-      <footer className="pb-2 text-center text-[10px] text-bodor-muted">
-        Bodor K1 · 3 kW · O₂/N₂ · STEP AP214 en milímetros · origen X=0 en
-        extremo izquierdo
+      <footer className="mx-auto max-w-7xl px-4 pb-4 text-center text-[10px] text-bodor-muted sm:px-6">
+        Bodor K1 · 3 kW · O₂/N₂ · STEP AP214 mm · origen X=0 a la izquierda
         {process.env.NEXT_PUBLIC_BUILD_ID && (
           <>
             {" · "}
@@ -599,6 +652,30 @@ export default function SketchToStep() {
         onSave={handleSave}
       />
     </main>
+  );
+}
+
+function Card({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-bodor-line bg-bodor-panel/60 p-4 shadow-sm">
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-bodor-text/90">
+          {title}
+        </h2>
+        {subtitle && (
+          <span className="text-[10px] text-bodor-muted">{subtitle}</span>
+        )}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -696,8 +773,6 @@ async function readSSEDrawing(
         if (stage === "calling_claude") onStage("Razonando con Opus 4.7…");
         if (stage === "fallback_force_tool")
           onStage("Reintentando para forzar el tool…");
-        if (stage === "verifying")
-          onStage("Verificando con un 2º modelo…");
       } else if (eventName === "done") {
         result = { drawing: (data as { drawing: unknown }).drawing };
       } else if (eventName === "error") {

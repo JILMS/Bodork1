@@ -253,57 +253,9 @@ export async function POST(req: NextRequest) {
       return;
     }
 
-    // Verification pass: ask Sonnet 4.6 (fast) to look at the original
-    // drawing AND the JSON Opus produced, and add anything missed.
-    // Sonnet returns the corrected DRAWING (full list, not just diff)
-    // so we can swap it in. If it fails or returns the same thing, we
-    // keep the original.
-    let finalDrawing = parsed.data;
-    let verifyUsage: Anthropic.Messages.Usage | null = null;
-    try {
-      send("stage", { stage: "verifying" });
-      const verifyContent: Anthropic.Messages.ContentBlockParam[] = [
-        inputBlock,
-        {
-          type: "text",
-          text:
-            "Otro modelo ha extraído este JSON del plano:\n\n" +
-            "```json\n" +
-            JSON.stringify(parsed.data, null, 2) +
-            "\n```\n\n" +
-            "Mira el plano de nuevo y verifica:\n" +
-            "1. ¿Falta algún agujero, slot o recorte que se vea en el plano y no esté en el JSON?\n" +
-            "2. ¿Sobra alguno que no exista realmente?\n" +
-            "3. ¿Alguna dimensión está claramente equivocada?\n\n" +
-            "Llama a submit_drawing con el JSON CORREGIDO Y COMPLETO (todas las piezas, todos los agujeros/slots/cutouts). Si el original ya está perfecto, devuélvelo tal cual.",
-        },
-      ];
-      const verify = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8000,
-        system: baseSystem,
-        tools,
-        tool_choice: { type: "tool", name: "submit_drawing" },
-        messages: [{ role: "user", content: verifyContent }],
-      });
-      const verifyTool = verify.content.find(
-        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
-      );
-      if (verifyTool) {
-        const verifiedParsed = DrawingZ.safeParse(verifyTool.input);
-        if (verifiedParsed.success) {
-          finalDrawing = verifiedParsed.data;
-          verifyUsage = verify.usage;
-        }
-      }
-    } catch {
-      // Verification is best-effort; on any error we ship the original.
-    }
-
     send("done", {
-      drawing: finalDrawing,
+      drawing: parsed.data,
       usage: response.usage,
-      verify_usage: verifyUsage,
     });
   });
 }
