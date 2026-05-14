@@ -60,15 +60,22 @@ function ViewerInner({
     const s = new THREE.Vector3();
     box.getSize(s);
     const d = Math.max(s.length(), 1);
-    const distance = d * 1.4;
+    // Correct camera distance from FOV: at FOV=35°, the half-angle is
+    // 17.5°, so we need distance = (size/2) / tan(half) for the size
+    // to exactly fill the frame. Use the FULL diagonal to guarantee
+    // every silhouette orientation fits, with a 25% margin so the
+    // part doesn't kiss the edges.
+    const fov = 35;
+    const halfFovRad = (fov / 2) * (Math.PI / 180);
+    const distance = (d / (2 * Math.tan(halfFovRad))) * 1.25;
     return {
       center: c,
       size: s,
       diag: d,
       initialPos: [
-        c.x + distance * 0.7,
+        c.x + distance * 0.65,
         c.y + distance * 0.5,
-        c.z + distance * 0.7,
+        c.z + distance * 0.55,
       ] as [number, number, number],
     };
   }, [mesh]);
