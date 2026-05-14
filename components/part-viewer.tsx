@@ -7,6 +7,8 @@ import {
   GizmoViewport,
   Grid,
   Html,
+  Bounds,
+  useBounds,
 } from "@react-three/drei";
 import * as THREE from "three";
 import type { Mesh as PartMesh } from "@/lib/occ/mesh-from-shape";
@@ -44,7 +46,11 @@ function ViewerInner({
   mesh: PartMesh;
   markers: FeatureMarker[];
 }) {
-  const { center, size, diag, initialPos } = useMemo(() => {
+  // Compute bounds for diagnostics and the grid placement. Camera
+  // fitting is handled by drei's <Bounds fit clip observe> which uses
+  // Three.js's own projection math — much more reliable than the
+  // manual FOV formula we had before.
+  const { center, size, diag, tris } = useMemo(() => {
     const box = new THREE.Box3();
     for (let i = 0; i < mesh.positions.length; i += 3) {
       box.expandByPoint(
@@ -60,36 +66,35 @@ function ViewerInner({
     const s = new THREE.Vector3();
     box.getSize(s);
     const d = Math.max(s.length(), 1);
-    // Correct camera distance from FOV: at FOV=35°, the half-angle is
-    // 17.5°, so we need distance = (size/2) / tan(half) for the size
-    // to exactly fill the frame. Use the FULL diagonal to guarantee
-    // every silhouette orientation fits, with a 25% margin so the
-    // part doesn't kiss the edges.
-    const fov = 35;
-    const halfFovRad = (fov / 2) * (Math.PI / 180);
-    const distance = (d / (2 * Math.tan(halfFovRad))) * 1.25;
     return {
       center: c,
       size: s,
       diag: d,
-      initialPos: [
-        c.x + distance * 0.65,
-        c.y + distance * 0.5,
-        c.z + distance * 0.55,
-      ] as [number, number, number],
+      tris: Math.floor(mesh.indices.length / 3),
     };
   }, [mesh]);
 
   const [resetTick, setResetTick] = useState(0);
+  const emptyMesh = tris === 0 || diag < 0.5;
 
   return (
     <div className="relative h-full w-full">
+      {emptyMesh && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-bodor-bg/90 p-6 text-center text-sm text-bodor-bad">
+          La pieza generada está vacía (0 triángulos). Probablemente un slot o
+          recorte demasiado grande borró todo el material. Revisa las cotas en
+          el editor.
+        </div>
+      )}
       <Canvas
         camera={{
-          position: initialPos,
+          // Initial position is a long-axis 3/4 view. <Bounds fit> will
+          // reposition it correctly on mount, so these numbers are
+          // only a fallback if Bounds fails.
+          position: [diag * 1.5, diag * 0.8, diag * 1.5],
           fov: 35,
-          near: diag / 1000,
-          far: diag * 50,
+          near: 0.01,
+          far: Math.max(diag * 200, 1000),
         }}
       >
         <color attach="background" args={["#d8ecd6"]} />
@@ -102,10 +107,14 @@ function ViewerInner({
           position={[-size.x, -size.y, size.z]}
           intensity={0.6}
         />
+
         <Suspense fallback={null}>
-          <PartGeometry mesh={mesh} />
+          <Bounds fit clip observe margin={1.25}>
+            <PartGeometry mesh={mesh} />
+          </Bounds>
           <FeatureMarkers markers={markers} />
         </Suspense>
+
         <Grid
           args={[diag * 4, diag * 4]}
           cellSize={Math.max(diag / 40, 1)}
@@ -116,20 +125,13 @@ function ViewerInner({
           position={[center.x, center.y - size.y * 0.6, center.z]}
           infiniteGrid
         />
-        <OrbitControls
-          makeDefault
-          target={[center.x, center.y, center.z]}
-        />
+        <OrbitControls makeDefault />
         <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
           <GizmoViewport
             axisColors={["#ff6b1a", "#66d9a8", "#6ba6ff"]}
           />
         </GizmoHelper>
-        <CameraResetter
-          position={initialPos}
-          target={center}
-          tick={resetTick}
-        />
+        <BoundsResetter tick={resetTick} />
       </Canvas>
       <button
         type="button"
@@ -141,8 +143,22 @@ function ViewerInner({
       <div className="pointer-events-none absolute bottom-2 left-2 z-10 rounded border border-bodor-bg/30 bg-white/90 px-2 py-1 text-[10px] text-bodor-bg shadow">
         ● rojo = agujero · ● naranja = slot · ● violeta = recorte
       </div>
+      <div className="pointer-events-none absolute bottom-2 right-2 z-10 rounded border border-bodor-bg/20 bg-white/85 px-2 py-1 text-[10px] tabular-nums text-bodor-bg shadow">
+        {Math.round(size.x)}×{Math.round(size.y)}×{Math.round(size.z)} mm ·
+        {" "}{tris.toLocaleString("es-ES")} triángulos
+      </div>
     </div>
   );
+}
+
+function BoundsResetter({ tick }: { tick: number }) {
+  const api = useBounds();
+  useEffect(() => {
+    // Refresh on every tick (including first mount). refresh() walks
+    // the scene to recompute the box, then fit() moves the camera.
+    api.refresh().fit();
+  }, [tick, api]);
+  return null;
 }
 
 function PartGeometry({ mesh }: { mesh: PartMesh }) {
@@ -152,13 +168,12 @@ function PartGeometry({ mesh }: { mesh: PartMesh }) {
     g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
     g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
     g.computeBoundingBox();
+    g.computeBoundingSphere();
     return g;
   }, [mesh]);
 
   return (
     <mesh geometry={geometry}>
-      {/* Dark blue-steel against the light green background gives high
-          contrast and makes holes / slots / cutouts pop. */}
       <meshStandardMaterial
         color="#3a4a5e"
         metalness={0.55}
@@ -166,31 +181,6 @@ function PartGeometry({ mesh }: { mesh: PartMesh }) {
       />
     </mesh>
   );
-}
-
-function CameraResetter({
-  position,
-  target,
-  tick,
-}: {
-  position: [number, number, number];
-  target: THREE.Vector3;
-  tick: number;
-}) {
-  const { camera, controls } = useThree() as unknown as {
-    camera: THREE.PerspectiveCamera;
-    controls: { target: THREE.Vector3; update: () => void } | null;
-  };
-  useEffect(() => {
-    camera.position.set(position[0], position[1], position[2]);
-    camera.up.set(0, 0, 1);
-    if (controls) {
-      controls.target.copy(target);
-      controls.update();
-    }
-    camera.lookAt(target);
-  }, [tick, camera, controls, position, target]);
-  return null;
 }
 
 function FeatureMarkers({ markers }: { markers: FeatureMarker[] }) {
@@ -337,5 +327,7 @@ function computeMarkers(spec: PartSpec): FeatureMarker[] {
   return markers;
 }
 
-// Suppress unused import warning until we actually use refs.
+// Suppress unused import lint while still keeping useRef + useThree
+// imported in case we re-introduce camera state later.
 void useRef;
+void useThree;
