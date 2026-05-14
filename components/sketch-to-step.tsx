@@ -548,10 +548,16 @@ export default function SketchToStep() {
                 selected={selected}
                 onSelect={setSelected}
               />
-              {drawing.parts.some((p) => p.profile.kind === "flat_bar") && (
+              {drawing.parts.some(
+                (p) =>
+                  p.profile.kind === "flat_bar" &&
+                  p.profile.length_mm >=
+                    p.profile.width_mm * FAKE_L_MIN_ASPECT,
+              ) && (
                 <div className="mt-2 rounded border border-bodor-accent/40 bg-bodor-accent/5 px-3 py-2 text-[11px] text-bodor-accent">
-                  Las pletinas se exportarán como falso ángulo en L
-                  (leg ≈ {FAKE_LEG_B_MM} mm). qty = 1 por defecto.
+                  Las pletinas largas se exportarán como falso ángulo en L
+                  (leg ≈ {FAKE_LEG_B_MM} mm). Las chapas cortas van como
+                  placa plana.
                 </div>
               )}
               {showEditor && (
@@ -687,10 +693,18 @@ function Card({
 // before building so the UI keeps showing "Pletina" while the STEP
 // shipped to the machine is the L variant.
 const FAKE_LEG_B_MM = 1;
+// Only convert to fake-L for clearly LONG bars (≥ 4× longer than wide).
+// Chapas / placas almost square get exported as flat plates directly,
+// because the fake-L trick produces broken geometry on those.
+const FAKE_L_MIN_ASPECT = 4;
 
 function pletinaToFakeAngle(p: PartSpec): PartSpec {
   if (p.profile.kind !== "flat_bar") return p;
   const fb = p.profile;
+  // Aspect ratio gate — chapas pass through as flat_bar unchanged.
+  if (fb.length_mm < fb.width_mm * FAKE_L_MIN_ASPECT) {
+    return p;
+  }
   const flipY = (eo: number | undefined) =>
     fb.width_mm - (eo ?? fb.width_mm / 2);
   const newHoles = fb.holes.map((h) => ({

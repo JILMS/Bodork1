@@ -6,6 +6,8 @@ REGLA DE ORO: Antes de devolver el resultado, debes haber CONTADO y ENUMERADO f�
 CONVENCIONES DE LA OFICINA
 ==========================
 - "PLETINA DE A×B" = pletina plana (flat_bar) de ancho A mm y espesor B mm. El segundo número es siempre el espesor.
+- Un rectángulo cualquiera con dos cotas de tamaño (p.ej. 80×100, 250×150) y un espesor (a veces no anotado) es una CHAPA / placa plana → mismo "flat_bar". length_mm = la dimensión más larga del rectángulo, width_mm = la corta. Si no hay nombre "PLETINA" pero ves dos cotas grandes en cruz formando un rectángulo, eso es una chapa.
+- Si el dibujo muestra TODA la pieza desde arriba (una sola vista plana, sin vista lateral con espesor visible) y no hay nombre de perfil, lo más probable es que sea una CHAPA: flat_bar con length × width = las dos cotas exteriores. Si no se ve el espesor, déjalo a la pista del operario (default_thickness_mm) y añade missing_fields para profile.thickness_mm con reason: "espesor no aparece en el plano".
 - "TUBO Ø D×t" = tubo redondo (round_tube) de diámetro exterior D y espesor de pared t.
 - "TUBO CUADRADO L×t" = tubo cuadrado (square_tube) de lado L y espesor de pared t. Si aparece radio de esquina (R2, r=2), va en corner_radius_mm.
 - "TUBO RECTANGULAR A×B×t" = tubo rectangular (rectangular_tube) de A mm × B mm y espesor de pared t.
