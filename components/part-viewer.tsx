@@ -113,7 +113,6 @@ function ViewerInner({
             <PartGeometry mesh={mesh} />
             <BoundsResetter tick={resetTick} />
           </Bounds>
-          <FeatureMarkers markers={markers} />
         </Suspense>
 
         <Grid
@@ -140,12 +139,8 @@ function ViewerInner({
       >
         Encajar vista
       </button>
-      <div className="pointer-events-none absolute bottom-2 left-2 z-10 rounded border border-bodor-bg/30 bg-white/90 px-2 py-1 text-[10px] text-bodor-bg shadow">
-        ● rojo = agujero · ● naranja = slot · ● violeta = recorte
-      </div>
       <div className="pointer-events-none absolute bottom-2 right-2 z-10 rounded border border-bodor-bg/20 bg-white/85 px-2 py-1 text-[10px] tabular-nums text-bodor-bg shadow">
-        {Math.round(size.x)}×{Math.round(size.y)}×{Math.round(size.z)} mm ·
-        {" "}{tris.toLocaleString("es-ES")} triángulos
+        {Math.round(size.x)}×{Math.round(size.y)}×{Math.round(size.z)} mm
       </div>
     </div>
   );

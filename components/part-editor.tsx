@@ -358,7 +358,7 @@ function MissingInput({
         type="number"
         inputMode="decimal"
         step="0.5"
-        value={
+        defaultValue={
           typeof current === "number"
             ? current
             : typeof mf.current_value === "number"
@@ -367,8 +367,29 @@ function MissingInput({
         }
         placeholder="mm"
         onChange={(e) => {
+          // Update ONLY the part's numeric value on every keystroke.
+          // Keep the missing_fields entry until the input loses focus
+          // so the user can edit freely without the field vanishing.
           const v = parseFloat(e.target.value);
-          const next = Number.isFinite(v) ? v : 0;
+          if (!Number.isFinite(v)) return;
+          const newPart = writePath(part, mf.field_path, v);
+          onChange({
+            ...drawing,
+            parts: drawing.parts.map((pp, idx) =>
+              idx === partIndex ? newPart : pp,
+            ),
+          });
+        }}
+        onBlur={(e) => {
+          // Mark as confirmed when the user leaves the field — only
+          // then drop it from missing_fields. Empty values fall back
+          // to the AI's best guess.
+          const v = parseFloat(e.target.value);
+          const next = Number.isFinite(v)
+            ? v
+            : typeof mf.current_value === "number"
+              ? mf.current_value
+              : 0;
           const newPart = writePath(part, mf.field_path, next);
           onChange({
             ...drawing,
@@ -377,7 +398,10 @@ function MissingInput({
             ),
             missing_fields: drawing.missing_fields.filter(
               (m) =>
-                !(m.part_index === partIndex && m.field_path === mf.field_path),
+                !(
+                  m.part_index === partIndex &&
+                  m.field_path === mf.field_path
+                ),
             ),
           });
         }}
