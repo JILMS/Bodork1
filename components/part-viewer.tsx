@@ -111,6 +111,7 @@ function ViewerInner({
         <Suspense fallback={null}>
           <Bounds fit clip observe margin={1.25}>
             <PartGeometry mesh={mesh} />
+            <BoundsResetter tick={resetTick} />
           </Bounds>
           <FeatureMarkers markers={markers} />
         </Suspense>
@@ -131,7 +132,6 @@ function ViewerInner({
             axisColors={["#ff6b1a", "#66d9a8", "#6ba6ff"]}
           />
         </GizmoHelper>
-        <BoundsResetter tick={resetTick} />
       </Canvas>
       <button
         type="button"
@@ -154,8 +154,11 @@ function ViewerInner({
 function BoundsResetter({ tick }: { tick: number }) {
   const api = useBounds();
   useEffect(() => {
-    // Refresh on every tick (including first mount). refresh() walks
-    // the scene to recompute the box, then fit() moves the camera.
+    // useBounds() returns null when the component is rendered outside
+    // a <Bounds> provider, or during the brief window before Bounds
+    // has registered its context. Bail out instead of crashing the
+    // whole canvas — Bounds will still auto-fit on its own observe.
+    if (!api || typeof api.refresh !== "function") return;
     api.refresh().fit();
   }, [tick, api]);
   return null;
