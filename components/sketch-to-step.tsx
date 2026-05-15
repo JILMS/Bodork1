@@ -548,16 +548,11 @@ export default function SketchToStep() {
                 selected={selected}
                 onSelect={setSelected}
               />
-              {drawing.parts.some(
-                (p) =>
-                  p.profile.kind === "flat_bar" &&
-                  p.profile.length_mm >=
-                    p.profile.width_mm * FAKE_L_MIN_ASPECT,
-              ) && (
+              {drawing.parts.some((p) => p.profile.kind === "flat_bar") && (
                 <div className="mt-2 rounded border border-bodor-accent/40 bg-bodor-accent/5 px-3 py-2 text-[11px] text-bodor-accent">
-                  Las pletinas largas se exportarán como falso ángulo en L
-                  (leg ≈ {FAKE_LEG_B_MM} mm). Las chapas cortas van como
-                  placa plana.
+                  Regla taller Bodor: las piezas planas se exportan como
+                  angular cuadrado (leg = lado corto), espesor = leg /
+                  10. La cara dibujada en el plano va al ala A.
                 </div>
               )}
               {showEditor && (
@@ -685,63 +680,111 @@ function Card({
   );
 }
 
-// Bodor K1 trick: flat bars (pletinas) cannot be cut directly by the
-// machine, but the postprocessor accepts angle (L) profiles. Real
-// shop workflow is to send the pletina as an L with a tiny second leg
-// (≈1 mm) and one piece in the order; the machine then cuts the
-// outline of the flat face. We do the conversion silently right
-// before building so the UI keeps showing "Pletina" while the STEP
-// shipped to the machine is the L variant.
-const FAKE_LEG_B_MM = 1;
-// Only convert to fake-L for clearly LONG bars (≥ 4× longer than wide).
-// Chapas / placas almost square get exported as flat plates directly,
-// because the fake-L trick produces broken geometry on those.
-const FAKE_L_MIN_ASPECT = 4;
+// Bodor K1 workshop rule: the machine NEVER accepts flat plates —
+// every piece is sent as a REAL square angle profile, regardless of
+// length-to-width ratio. The plan always shows ONE face of the angle.
+// Convention:
+//   leg_a = leg_b = SHORT side of the rectangle (so it's a square L)
+//   length = LONG side
+//   thickness = leg / 10 (40 → 4 mm, 80 → 8 mm, 150 → 15 mm), unless
+//                         the plan explicitly indicated another value
+// All features (holes, slots, cutouts) live on leg "a", which is the
+// face the operator drew. We do the conversion silently right before
+// building so the UI keeps showing the original rectangle while the
+// STEP shipped to the machine is the workshop-correct angle.
+const FAKE_LEG_B_MM = 1; // kept for backwards-compat with any prompt notes
+const WORKSHOP_THICKNESS_RATIO = 10;
 
 function pletinaToFakeAngle(p: PartSpec): PartSpec {
   if (p.profile.kind !== "flat_bar") return p;
   const fb = p.profile;
-  // Aspect ratio gate — chapas pass through as flat_bar unchanged.
-  if (fb.length_mm < fb.width_mm * FAKE_L_MIN_ASPECT) {
-    return p;
-  }
-  const flipY = (eo: number | undefined) =>
-    fb.width_mm - (eo ?? fb.width_mm / 2);
-  const newHoles = fb.holes.map((h) => ({
-    diameter_mm: h.diameter_mm,
-    position_mm: h.position_mm,
-    edge_offset_mm: flipY(h.edge_offset_mm),
-    type: h.type,
-    leg: "a" as const,
-  }));
-  const newSlots = fb.slots.map((s) => ({
-    length_mm: s.length_mm,
-    width_mm: s.width_mm,
-    position_mm: s.position_mm,
-    edge_offset_mm: flipY(s.edge_offset_mm),
-    rotation_deg: s.rotation_deg,
-    leg: "a" as const,
-  }));
-  const newCutouts = fb.cutouts.map((c) => ({
-    length_mm: c.length_mm,
-    width_mm: c.width_mm,
-    position_mm: c.position_mm,
-    edge_offset_mm: flipY(c.edge_offset_mm),
-    rotation_deg: c.rotation_deg,
-    leg: "a" as const,
-  }));
+
+  // Identify the long and short sides of the rectangle and whether
+  // we need to swap axes so position_mm runs along the long side.
+  const long = Math.max(fb.length_mm, fb.width_mm);
+  const short = Math.min(fb.length_mm, fb.width_mm);
+  const swap = fb.width_mm > fb.length_mm;
+
+  // Workshop thickness rule: leg / 10. If the AI gave us a thickness
+  // notably different (more than ±25 % off), trust the plan — those
+  // are the "rare cases" the user mentioned. Otherwise snap to the
+  // workshop default so 80 mm always means 8 mm, 150 always 15.
+  const workshopT = short / WORKSHOP_THICKNESS_RATIO;
+  const planT = fb.thickness_mm;
+  const planTrusted =
+    planT > 0 && Math.abs(planT - workshopT) / workshopT > 0.25;
+  const thickness = planTrusted ? planT : workshopT;
+
+  // After swap, what used to be position_mm (X) becomes edge_offset
+  // (Y across the leg) and vice-versa. In the angle frame, leg-a
+  // edge_offset is measured from the OUTER edge (Y = leg) toward the
+  // corner — i.e. (leg - localY).
+  const mapXY = (
+    rawX: number,
+    rawY: number | undefined,
+  ): { x: number; y: number } => {
+    const localY = rawY ?? fb.width_mm / 2;
+    if (swap) {
+      // Original (X along width, Y along length) → new (X along
+      // length=long=old width, Y along leg=short=old length).
+      return { x: localY, y: rawX };
+    }
+    return { x: rawX, y: localY };
+  };
+  const flipToLegA = (y: number) => short - y;
+
+  const newHoles = fb.holes.map((h) => {
+    const { x, y } = mapXY(h.position_mm, h.edge_offset_mm);
+    return {
+      diameter_mm: h.diameter_mm,
+      position_mm: x,
+      edge_offset_mm: flipToLegA(y),
+      type: h.type,
+      leg: "a" as const,
+    };
+  });
+  const newSlots = fb.slots.map((s) => {
+    const { x, y } = mapXY(s.position_mm, s.edge_offset_mm);
+    const rotation_deg = swap
+      ? ((s.rotation_deg ?? 0) + 90) % 180
+      : s.rotation_deg ?? 0;
+    return {
+      length_mm: s.length_mm,
+      width_mm: s.width_mm,
+      position_mm: x,
+      edge_offset_mm: flipToLegA(y),
+      rotation_deg,
+      leg: "a" as const,
+    };
+  });
+  const newCutouts = fb.cutouts.map((c) => {
+    const { x, y } = mapXY(c.position_mm, c.edge_offset_mm);
+    const rotation_deg = swap
+      ? ((c.rotation_deg ?? 0) + 90) % 180
+      : c.rotation_deg ?? 0;
+    return {
+      length_mm: c.length_mm,
+      width_mm: c.width_mm,
+      position_mm: x,
+      edge_offset_mm: flipToLegA(y),
+      rotation_deg,
+      leg: "a" as const,
+    };
+  });
+
   return {
     ...p,
     quantity: 1,
     notes:
       (p.notes ? p.notes + " · " : "") +
-      `Enviada como falsa L (truco Bodor, ala B = ${FAKE_LEG_B_MM} mm, qty=1)`,
+      `Convertida a angular ${short}×${short} × ${long} mm, espesor ${thickness} mm` +
+      (planTrusted ? " (espesor del plano)" : " (regla taller leg/10)"),
     profile: {
       kind: "angle_profile",
-      length_mm: fb.length_mm,
-      leg_a_mm: fb.width_mm,
-      leg_b_mm: FAKE_LEG_B_MM,
-      thickness_mm: fb.thickness_mm,
+      length_mm: long,
+      leg_a_mm: short,
+      leg_b_mm: short, // SQUARE angle — both legs equal per workshop rule
+      thickness_mm: thickness,
       holes: newHoles,
       slots: newSlots,
       cutouts: newCutouts,

@@ -6,8 +6,11 @@ REGLA DE ORO: Antes de devolver el resultado, debes haber CONTADO y ENUMERADO f�
 CONVENCIONES DE LA OFICINA
 ==========================
 - "PLETINA DE A×B" = pletina plana (flat_bar) de ancho A mm y espesor B mm. El segundo número es siempre el espesor.
-- Un rectángulo cualquiera con dos cotas de tamaño (p.ej. 80×100, 250×150) y un espesor (a veces no anotado) es una CHAPA / placa plana → mismo "flat_bar". length_mm = la dimensión más larga del rectángulo, width_mm = la corta. Si no hay nombre "PLETINA" pero ves dos cotas grandes en cruz formando un rectángulo, eso es una chapa.
-- Si el dibujo muestra TODA la pieza desde arriba (una sola vista plana, sin vista lateral con espesor visible) y no hay nombre de perfil, lo más probable es que sea una CHAPA: flat_bar con length × width = las dos cotas exteriores. Si no se ve el espesor, déjalo a la pista del operario (default_thickness_mm) y añade missing_fields para profile.thickness_mm con reason: "espesor no aparece en el plano".
+- ⚠ IMPORTANTE — REGLA DEL TALLER BODOR K1: la máquina NUNCA acepta piezas planas (chapas). TODA pieza plana o rectangular del plano se va a interpretar y enviar como ANGULAR (perfil L cuadrado). El plano siempre muestra UNA cara del angular (la cara A). Cuando ves un rectángulo cualquiera (con o sin nombre "PLETINA", "CHAPA", "PLACA"…), interpreta:
+    * length_mm = la cota MÁS LARGA del rectángulo.
+    * width_mm   = la cota MÁS CORTA del rectángulo.
+    * thickness_mm = width_mm / 10 (regla del taller: 40×40 → 4, 80×80 → 8, 150×150 → 15). Sólo usa otro valor si el plano indica explícitamente un espesor distinto.
+  El cliente convertirá esto a angle_profile con leg_a = leg_b = width_mm y todos los agujeros / slots / recortes en la cara A. Tú devuélvelo como flat_bar — la conversión final se hace después.
 - "TUBO Ø D×t" = tubo redondo (round_tube) de diámetro exterior D y espesor de pared t.
 - "TUBO CUADRADO L×t" = tubo cuadrado (square_tube) de lado L y espesor de pared t. Si aparece radio de esquina (R2, r=2), va en corner_radius_mm.
 - "TUBO RECTANGULAR A×B×t" = tubo rectangular (rectangular_tube) de A mm × B mm y espesor de pared t.
