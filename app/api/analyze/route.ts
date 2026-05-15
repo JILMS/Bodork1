@@ -174,11 +174,13 @@ export async function POST(req: NextRequest) {
       response = await anthropic.messages.create({
         model: "claude-opus-4-7",
         max_tokens: 16_000,
-        // Adaptive thinking + medium effort: high quality without
-        // blowing past the Vercel timeout. Operator can re-run a
-        // tougher plan with the manual editor if needed.
+        // Max-precision mode: xhigh effort is one step below "max".
+        // Combined with the SSE streaming + 2-model verification pass
+        // below it gives us the highest realistic recall on dense
+        // engineering plans. Cost / time goes up; the operator
+        // explicitly asked for "que lo lea todo bien".
         thinking: { type: "adaptive" },
-        output_config: { effort: "medium" },
+        output_config: { effort: "xhigh" },
         system: baseSystem,
         tools,
         tool_choice: { type: "auto" },
@@ -253,8 +255,89 @@ export async function POST(req: NextRequest) {
       return;
     }
 
+    // Maximum-precision verification pass: feed the ORIGINAL drawing
+    // back to Opus 4.7 alongside its own first-pass JSON and ask it
+    // explicitly to find anything missed (extra holes, slots,
+    // cutouts, wrong dimensions). The model returns a CORRECTED FULL
+    // JSON; we keep the verified version when it parses cleanly,
+    // otherwise we ship the original. Best-effort: any error in
+    // verification doesn't break the flow.
+    let finalDrawing = parsed.data;
+    try {
+      send("stage", { stage: "verifying" });
+      const verifyContent: Anthropic.Messages.ContentBlockParam[] = [
+        inputBlock,
+        {
+          type: "text",
+          text:
+            "Un primer modelo te ha entregado este JSON extraído del plano:\n\n" +
+            "```json\n" +
+            JSON.stringify(parsed.data, null, 2) +
+            "\n```\n\n" +
+            "Vuelve a mirar EL PLANO ORIGINAL con detalle y revisa, vista por vista:\n" +
+            "1. ¿Hay algún agujero redondo (círculo) en el plano que NO esté en el JSON? Cuéntalos todos.\n" +
+            "2. ¿Hay algún agujero oblongo / coliso / slot que falte?\n" +
+            "3. ¿Hay algún recorte rectangular o muesca de extremo que falte?\n" +
+            "4. ¿Alguna dimensión clave (length, width, thickness, posiciones) está mal leída?\n" +
+            "5. ¿Sobra algo que en realidad no existe?\n\n" +
+            "Llama a submit_drawing con el JSON CORREGIDO COMPLETO (todas las piezas, todos los features). Si el JSON original ya está perfecto, devuélvelo tal cual.",
+        },
+      ];
+      const verify = await anthropic.messages.create({
+        model: "claude-opus-4-7",
+        max_tokens: 16_000,
+        thinking: { type: "adaptive" },
+        output_config: { effort: "high" },
+        system: baseSystem,
+        tools,
+        tool_choice: { type: "auto" },
+        messages: [{ role: "user", content: verifyContent }],
+      });
+      const verifyTool = verify.content.find(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+      );
+      if (verifyTool) {
+        const verifiedParsed = DrawingZ.safeParse(verifyTool.input);
+        if (verifiedParsed.success) {
+          // Sanity guard: keep verified only if it has at least as
+          // many features as the original. The verifier should add,
+          // not remove (unless it spotted something the first pass
+          // hallucinated). If the count drops dramatically (e.g. >40
+          // %), keep the more complete first pass.
+          const totalFeats = (d: typeof finalDrawing) =>
+            d.parts.reduce((n, p) => {
+              const pr = p.profile;
+              if (
+                pr.kind === "flat_bar" ||
+                pr.kind === "angle_profile"
+              )
+                return (
+                  n +
+                  pr.holes.length +
+                  pr.slots.length +
+                  pr.cutouts.length
+                );
+              if (
+                pr.kind === "round_tube" ||
+                pr.kind === "square_tube" ||
+                pr.kind === "rectangular_tube"
+              )
+                return n + pr.holes.length;
+              return n;
+            }, 0);
+          const before = totalFeats(parsed.data);
+          const after = totalFeats(verifiedParsed.data);
+          if (after >= before * 0.6) {
+            finalDrawing = verifiedParsed.data;
+          }
+        }
+      }
+    } catch {
+      // Verification is best-effort; ship the original on any error.
+    }
+
     send("done", {
-      drawing: parsed.data,
+      drawing: finalDrawing,
       usage: response.usage,
     });
   });

@@ -65,10 +65,10 @@ const INITIAL_PROGRESS: Progress = {
     },
     analyze: {
       id: "analyze",
-      label: "Interpretar plano con IA (Opus 4.7 + thinking)",
+      label: "Interpretar plano con IA (Opus 4.7 ×2)",
       state: "pending",
-      estimateRangeSec: [15, 60],
-      note: "Opus 4.7 con razonamiento extendido para enumerar TODO",
+      estimateRangeSec: [30, 120],
+      note: "Opus 4.7 effort=xhigh + verificación 2º pase",
     },
     engine: {
       id: "engine",
@@ -830,6 +830,8 @@ async function readSSEDrawing(
         if (stage === "calling_claude") onStage("Razonando con Opus 4.7…");
         if (stage === "fallback_force_tool")
           onStage("Reintentando para forzar el tool…");
+        if (stage === "verifying")
+          onStage("Verificando con un 2º pase de Opus…");
       } else if (eventName === "done") {
         result = { drawing: (data as { drawing: unknown }).drawing };
       } else if (eventName === "error") {
