@@ -58,10 +58,29 @@ export function buildAngleProfile(
   const tools: ShapeHandle[] = holes.map((h) =>
     holeTool(oc, h, leg_a_mm, leg_b_mm, t, overshoot),
   );
+
+  // Defensive: skip any slot / cutout whose dimensions would not
+  // fit inside the relevant leg face. Leg-a face is leg_a × length;
+  // leg-b face is leg_b × length. A slot that's wider than the leg
+  // OR longer than the bar will eat the piece and produce the
+  // dreaded hourglass solid. Operator can re-add via the editor
+  // once dimensions are confirmed.
+  const fitsOnFace = (
+    feat: Slot | Cutout,
+    legWidth: number,
+  ): boolean => {
+    if (feat.length_mm >= length_mm * 0.95) return false;
+    if (feat.width_mm >= legWidth * 0.95) return false;
+    return true;
+  };
   for (const s of spec.slots) {
+    const legWidth = s.leg === "a" ? leg_a_mm : leg_b_mm;
+    if (!fitsOnFace(s, legWidth)) continue;
     tools.push(slotOrRectTool(oc, s, "slot", t, leg_a_mm, leg_b_mm, overshoot));
   }
   for (const c of spec.cutouts) {
+    const legWidth = c.leg === "a" ? leg_a_mm : leg_b_mm;
+    if (!fitsOnFace(c, legWidth)) continue;
     tools.push(slotOrRectTool(oc, c, "rect", t, leg_a_mm, leg_b_mm, overshoot));
   }
 

@@ -895,53 +895,88 @@ function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
         ? p.material
         : hints.default_material;
 
-    // Sanity check: when a slot or cutout is suspiciously close to
-    // the size of the part itself, the AI likely confused the outer
-    // rectangle (the piece) with an inner feature (the slot). Flag
-    // the part's dimensions for the operator to confirm before
-    // building. Without this guard the OCC build produces a
-    // "hourglass" solid that has no relation to the real plan.
+    // Slots / cutouts that obviously can't fit in the piece are
+    // proof that the AI confused the outer rectangle of the plan
+    // with one of its inner features. We DROP those mis-detected
+    // features outright (better no slot than an hourglass), and
+    // flag the piece's dimensions as "to confirm" so the operator
+    // types the real values before building.
     if (profile.kind === "flat_bar") {
       const fb = profile;
-      for (const s of fb.slots) {
+      const tooBig = (l: number, w: number) =>
+        l > fb.length_mm * 0.85 || w > fb.width_mm * 0.85;
+
+      const droppedSlots = fb.slots.filter((s) =>
+        tooBig(s.length_mm, s.width_mm),
+      );
+      const droppedCutouts = fb.cutouts.filter((c) =>
+        tooBig(c.length_mm, c.width_mm),
+      );
+      const cleanSlots = fb.slots.filter(
+        (s) => !tooBig(s.length_mm, s.width_mm),
+      );
+      const cleanCutouts = fb.cutouts.filter(
+        (c) => !tooBig(c.length_mm, c.width_mm),
+      );
+
+      if (droppedSlots.length || droppedCutouts.length) {
+        // The piece's real dimensions are probably mis-read. Force
+        // the operator to confirm them.
+        const reason =
+          `La IA detectó ${droppedSlots.length + droppedCutouts.length} feature(s) más grande(s) que la pieza — confundió cota EXTERIOR del rectángulo con cota INTERIOR del slot. Confirma length y width REALES (cotas de los bordes del rectángulo, normalmente las más grandes del plano).`;
         if (
-          s.length_mm > fb.length_mm * 0.9 ||
-          s.width_mm > fb.width_mm * 0.9
+          !newMissing.some(
+            (m) =>
+              m.part_index === partIndex &&
+              m.field_path === "profile.length_mm",
+          )
         ) {
-          if (
-            !newMissing.some(
-              (m) =>
-                m.part_index === partIndex &&
-                m.field_path === "profile.length_mm",
-            )
-          ) {
-            newMissing.push({
-              part_index: partIndex,
-              field_path: "profile.length_mm",
-              label: "Longitud de la pieza",
-              reason:
-                "El slot detectado ocupa casi toda la pieza — probable confusión entre cota EXTERIOR del rectángulo y cotas INTERIORES del slot. Confirma la longitud REAL (la cota más grande del plano, fuera del rectángulo).",
-              current_value: fb.length_mm,
-            });
-          }
-          if (
-            !newMissing.some(
-              (m) =>
-                m.part_index === partIndex &&
-                m.field_path === "profile.width_mm",
-            )
-          ) {
-            newMissing.push({
-              part_index: partIndex,
-              field_path: "profile.width_mm",
-              label: "Ancho de la pieza",
-              reason:
-                "Mismo motivo que la longitud — verifica que es la cota EXTERIOR del rectángulo y no la del slot.",
-              current_value: fb.width_mm,
-            });
-          }
-          break;
+          newMissing.push({
+            part_index: partIndex,
+            field_path: "profile.length_mm",
+            label: "Longitud de la pieza",
+            reason,
+            current_value: fb.length_mm,
+          });
         }
+        if (
+          !newMissing.some(
+            (m) =>
+              m.part_index === partIndex &&
+              m.field_path === "profile.width_mm",
+          )
+        ) {
+          newMissing.push({
+            part_index: partIndex,
+            field_path: "profile.width_mm",
+            label: "Ancho de la pieza",
+            reason,
+            current_value: fb.width_mm,
+          });
+        }
+        // Add an entry per dropped feature so the operator can re-
+        // add it manually with the correct dimensions in the editor.
+        for (const s of droppedSlots) {
+          newMissing.push({
+            part_index: partIndex,
+            field_path: `profile.slots.dropped`,
+            label: `Slot ${s.length_mm}×${s.width_mm} descartado`,
+            reason:
+              "El slot detectado era más grande que la pieza. Añádelo manualmente en el editor con las dimensiones reales del plano.",
+            current_value: s.length_mm,
+          });
+        }
+        for (const c of droppedCutouts) {
+          newMissing.push({
+            part_index: partIndex,
+            field_path: `profile.cutouts.dropped`,
+            label: `Recorte ${c.length_mm}×${c.width_mm} descartado`,
+            reason:
+              "El recorte detectado era más grande que la pieza. Añádelo manualmente en el editor.",
+            current_value: c.length_mm,
+          });
+        }
+        profile = { ...fb, slots: cleanSlots, cutouts: cleanCutouts };
       }
     }
     return { ...p, material, profile };

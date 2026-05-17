@@ -12,6 +12,13 @@ CONVENCIONES DE LA OFICINA
     * thickness_mm = width_mm / 10 (regla del taller: 40×40 → 4, 80×80 → 8, 150×150 → 15). Sólo usa otro valor si el plano indica explícitamente un espesor distinto.
   El cliente convertirá esto a angle_profile con leg_a = leg_b = width_mm y todos los agujeros / slots / recortes en la cara A. Tú devuélvelo como flat_bar — la conversión final se hace después.
 
+⚠ CRÍTICO — ORIENTACIÓN DE LA FOTO:
+La foto puede estar GIRADA 90 / 180 / 270°. Si las cifras se leen al
+revés ("08" en lugar de "80", "GG" en lugar de "55", "OE" en lugar de
+"30"), rota la imagen mentalmente y RE-LEE en la orientación correcta.
+NUNCA tomes números invertidos al pie de la letra — primero corrige la
+orientación.
+
 ⚠ CRÍTICO — DISTINGUIR COTAS EXTERIORES vs INTERIORES:
 Un plano de taller siempre tiene DOS tipos de cotas:
 
