@@ -201,10 +201,19 @@ export function PartEditor({
       <button
         type="button"
         onClick={onBuild}
-        disabled={!canBuild || isBuilding}
+        disabled={!canBuild || isBuilding || totalMissing > 0}
+        title={
+          totalMissing > 0
+            ? `Confirma primero ${totalMissing} dato${totalMissing === 1 ? "" : "s"} en ámbar`
+            : undefined
+        }
         className="h-12 rounded bg-bodor-accent px-4 text-sm font-bold uppercase tracking-wider text-bodor-bg transition-colors hover:bg-bodor-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {isBuilding ? "Construyendo…" : "Construir 3D"}
+        {isBuilding
+          ? "Construyendo…"
+          : totalMissing > 0
+            ? `Confirma ${totalMissing} dato${totalMissing === 1 ? "" : "s"} antes de construir`
+            : "Construir 3D"}
       </button>
 
       <button

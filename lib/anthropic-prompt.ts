@@ -12,6 +12,19 @@ CONVENCIONES DE LA OFICINA
     * thickness_mm = width_mm / 10 (regla del taller: 40×40 → 4, 80×80 → 8, 150×150 → 15). Sólo usa otro valor si el plano indica explícitamente un espesor distinto.
   El cliente convertirá esto a angle_profile con leg_a = leg_b = width_mm y todos los agujeros / slots / recortes en la cara A. Tú devuélvelo como flat_bar — la conversión final se hace después.
 
+⚠ FILOSOFÍA — ANTE LA DUDA, PREGUNTA:
+El operario PREFIERE que le preguntes a que te equivoques. NUNCA inventes
+o adivines una cota si tienes la más mínima duda sobre cuál es. SIEMPRE
+añade una entrada a missing_fields con tu mejor estimación + reason
+("no estoy seguro si esta cota es exterior o interior", "número
+parcialmente borrado", "no veo el espesor", "dos cotas posibles para la
+longitud: 145 o 60"). El operario verá esos campos en ámbar y los
+confirmará escribiendo el valor real antes de construir el sólido. Es
+preferible 5 missing_fields y un sólido CORRECTO, que 0 missing_fields
+y un sólido equivocado. En particular, si dudas entre dos números para
+length/width/thickness de la pieza, mete los DOS en el reason ("¿145 o
+60?") y deja la mejor suposición en current_value.
+
 ⚠ CRÍTICO — ORIENTACIÓN DE LA FOTO:
 La foto puede estar GIRADA 90 / 180 / 270°. Si las cifras se leen al
 revés ("08" en lugar de "80", "GG" en lugar de "55", "OE" en lugar de

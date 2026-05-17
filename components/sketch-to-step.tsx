@@ -954,28 +954,11 @@ function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
             current_value: fb.width_mm,
           });
         }
-        // Add an entry per dropped feature so the operator can re-
-        // add it manually with the correct dimensions in the editor.
-        for (const s of droppedSlots) {
-          newMissing.push({
-            part_index: partIndex,
-            field_path: `profile.slots.dropped`,
-            label: `Slot ${s.length_mm}×${s.width_mm} descartado`,
-            reason:
-              "El slot detectado era más grande que la pieza. Añádelo manualmente en el editor con las dimensiones reales del plano.",
-            current_value: s.length_mm,
-          });
-        }
-        for (const c of droppedCutouts) {
-          newMissing.push({
-            part_index: partIndex,
-            field_path: `profile.cutouts.dropped`,
-            label: `Recorte ${c.length_mm}×${c.width_mm} descartado`,
-            reason:
-              "El recorte detectado era más grande que la pieza. Añádelo manualmente en el editor.",
-            current_value: c.length_mm,
-          });
-        }
+        // Dropped slots / cutouts are silently removed. The operator
+        // can re-add them via "Editar a mano" once dimensions are
+        // confirmed — listing them as non-editable missing entries
+        // would just block the Construir 3D button without offering
+        // a real action.
         profile = { ...fb, slots: cleanSlots, cutouts: cleanCutouts };
       }
     }
