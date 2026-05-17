@@ -67,8 +67,8 @@ const INITIAL_PROGRESS: Progress = {
       id: "analyze",
       label: "Interpretar plano con IA (Opus 4.7 ×2)",
       state: "pending",
-      estimateRangeSec: [30, 120],
-      note: "Opus 4.7 effort=xhigh + verificación 2º pase",
+      estimateRangeSec: [20, 60],
+      note: "Opus 4.7 effort=high + verificación 2º pase",
     },
     engine: {
       id: "engine",
@@ -231,34 +231,70 @@ export default function SketchToStep() {
 
         const t1 = Date.now();
         markActive("analyze");
-        const res = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            image_base64: base64,
-            media_type,
-            hints: {
-              default_material: hints.default_material,
-              default_thickness_mm: hints.default_thickness_mm,
-              force_profile_kind:
-                hints.force_profile_kind === "auto"
-                  ? undefined
-                  : hints.force_profile_kind,
-              force_corner_radius_mm:
-                hints.force_corner_radius_mm > 0
-                  ? hints.force_corner_radius_mm
-                  : undefined,
-            },
-          }),
+        // Up to 2 retries on a raw network failure (mobile carriers
+        // sometimes drop SSE mid-stream on a long analysis).
+        let sseResult: { drawing?: unknown; error?: string } | null = null;
+        let lastNetError: Error | null = null;
+        const payload = JSON.stringify({
+          image_base64: base64,
+          media_type,
+          hints: {
+            default_material: hints.default_material,
+            default_thickness_mm: hints.default_thickness_mm,
+            force_profile_kind:
+              hints.force_profile_kind === "auto"
+                ? undefined
+                : hints.force_profile_kind,
+            force_corner_radius_mm:
+              hints.force_corner_radius_mm > 0
+                ? hints.force_corner_radius_mm
+                : undefined,
+          },
         });
-        if (!res.ok || !res.body) {
-          throw new Error(`Error ${res.status}`);
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt > 0) {
+              setProgress((p) =>
+                updateStep(p, "analyze", {
+                  state: "active",
+                  note: `Reintentando (intento ${attempt + 1}/3)…`,
+                }),
+              );
+              await new Promise((r) => setTimeout(r, 1500 * attempt));
+            }
+            const res = await fetch("/api/analyze", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: payload,
+            });
+            if (!res.ok || !res.body) {
+              throw new Error(`Error ${res.status}`);
+            }
+            sseResult = await readSSEDrawing(res, (note) =>
+              setProgress((p) =>
+                updateStep(p, "analyze", { state: "active", note }),
+              ),
+            );
+            break;
+          } catch (e) {
+            lastNetError = e as Error;
+            const msg = lastNetError.message.toLowerCase();
+            const isNetErr =
+              msg.includes("network") ||
+              msg.includes("fetch") ||
+              msg.includes("failed to fetch") ||
+              msg.includes("load") ||
+              msg.includes("abort");
+            if (!isNetErr) throw lastNetError;
+            // Otherwise loop and retry.
+          }
         }
-        const sseResult = await readSSEDrawing(res, (note) =>
-          setProgress((p) =>
-            updateStep(p, "analyze", { state: "active", note }),
-          ),
-        );
+        if (!sseResult) {
+          throw new Error(
+            (lastNetError?.message ?? "Sin respuesta") +
+              " — la red móvil cortó la conexión. Prueba con WiFi o vuelve a intentarlo.",
+          );
+        }
         if (sseResult.error) throw new Error(sseResult.error);
         if (!sseResult.drawing) throw new Error("Sin respuesta del análisis.");
         const raw = sseResult.drawing as Drawing;

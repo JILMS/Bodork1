@@ -44,13 +44,14 @@ function sseResponse(
       };
       const ka = setInterval(() => {
         // SSE comment line: ignored by clients but keeps the TCP
-        // connection alive past Vercel's idle-cut threshold.
+        // connection alive past mobile-carrier NAT idle timeouts
+        // (commonly 30-60 s of inactivity).
         try {
           controller.enqueue(encoder.encode(`: keepalive ${Date.now()}\n\n`));
         } catch {
           /* controller closed */
         }
-      }, 10_000);
+      }, 5_000);
       try {
         await factory(send);
       } catch (e) {
@@ -174,13 +175,12 @@ export async function POST(req: NextRequest) {
       response = await anthropic.messages.create({
         model: "claude-opus-4-7",
         max_tokens: 16_000,
-        // Max-precision mode: xhigh effort is one step below "max".
-        // Combined with the SSE streaming + 2-model verification pass
-        // below it gives us the highest realistic recall on dense
-        // engineering plans. Cost / time goes up; the operator
-        // explicitly asked for "que lo lea todo bien".
+        // High-precision but mobile-friendly: "xhigh" routinely
+        // pushed past 90 s on dense plans, and mobile carriers were
+        // killing the SSE connection mid-stream. "high" still gives
+        // very strong recall, completes in 25-45 s typical.
         thinking: { type: "adaptive" },
-        output_config: { effort: "xhigh" },
+        output_config: { effort: "high" },
         system: baseSystem,
         tools,
         tool_choice: { type: "auto" },
@@ -285,9 +285,9 @@ export async function POST(req: NextRequest) {
       ];
       const verify = await anthropic.messages.create({
         model: "claude-opus-4-7",
-        max_tokens: 16_000,
+        max_tokens: 12_000,
         thinking: { type: "adaptive" },
-        output_config: { effort: "high" },
+        output_config: { effort: "medium" },
         system: baseSystem,
         tools,
         tool_choice: { type: "auto" },
