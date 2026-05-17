@@ -879,24 +879,77 @@ async function readSSEDrawing(
 }
 
 function applyClientHints(drawing: Drawing, hints: Hints): Drawing {
+  const newMissing = [...drawing.missing_fields];
+  const parts = drawing.parts.map((p, partIndex) => {
+    const pr = p.profile;
+    let profile = pr;
+    if (
+      hints.force_corner_radius_mm > 0 &&
+      (pr.kind === "square_tube" || pr.kind === "rectangular_tube") &&
+      (pr.corner_radius_mm === undefined || pr.corner_radius_mm === 0)
+    ) {
+      profile = { ...pr, corner_radius_mm: hints.force_corner_radius_mm };
+    }
+    const material =
+      p.material && p.material !== "acero_carbono"
+        ? p.material
+        : hints.default_material;
+
+    // Sanity check: when a slot or cutout is suspiciously close to
+    // the size of the part itself, the AI likely confused the outer
+    // rectangle (the piece) with an inner feature (the slot). Flag
+    // the part's dimensions for the operator to confirm before
+    // building. Without this guard the OCC build produces a
+    // "hourglass" solid that has no relation to the real plan.
+    if (profile.kind === "flat_bar") {
+      const fb = profile;
+      for (const s of fb.slots) {
+        if (
+          s.length_mm > fb.length_mm * 0.9 ||
+          s.width_mm > fb.width_mm * 0.9
+        ) {
+          if (
+            !newMissing.some(
+              (m) =>
+                m.part_index === partIndex &&
+                m.field_path === "profile.length_mm",
+            )
+          ) {
+            newMissing.push({
+              part_index: partIndex,
+              field_path: "profile.length_mm",
+              label: "Longitud de la pieza",
+              reason:
+                "El slot detectado ocupa casi toda la pieza — probable confusión entre cota EXTERIOR del rectángulo y cotas INTERIORES del slot. Confirma la longitud REAL (la cota más grande del plano, fuera del rectángulo).",
+              current_value: fb.length_mm,
+            });
+          }
+          if (
+            !newMissing.some(
+              (m) =>
+                m.part_index === partIndex &&
+                m.field_path === "profile.width_mm",
+            )
+          ) {
+            newMissing.push({
+              part_index: partIndex,
+              field_path: "profile.width_mm",
+              label: "Ancho de la pieza",
+              reason:
+                "Mismo motivo que la longitud — verifica que es la cota EXTERIOR del rectángulo y no la del slot.",
+              current_value: fb.width_mm,
+            });
+          }
+          break;
+        }
+      }
+    }
+    return { ...p, material, profile };
+  });
   return {
     ...drawing,
-    parts: drawing.parts.map((p) => {
-      const pr = p.profile;
-      let profile = pr;
-      if (
-        hints.force_corner_radius_mm > 0 &&
-        (pr.kind === "square_tube" || pr.kind === "rectangular_tube") &&
-        (pr.corner_radius_mm === undefined || pr.corner_radius_mm === 0)
-      ) {
-        profile = { ...pr, corner_radius_mm: hints.force_corner_radius_mm };
-      }
-      const material =
-        p.material && p.material !== "acero_carbono"
-          ? p.material
-          : hints.default_material;
-      return { ...p, material, profile };
-    }),
+    parts,
+    missing_fields: newMissing,
   };
 }
 

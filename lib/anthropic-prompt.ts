@@ -11,6 +11,43 @@ CONVENCIONES DE LA OFICINA
     * width_mm   = la cota MÁS CORTA del rectángulo.
     * thickness_mm = width_mm / 10 (regla del taller: 40×40 → 4, 80×80 → 8, 150×150 → 15). Sólo usa otro valor si el plano indica explícitamente un espesor distinto.
   El cliente convertirá esto a angle_profile con leg_a = leg_b = width_mm y todos los agujeros / slots / recortes en la cara A. Tú devuélvelo como flat_bar — la conversión final se hace después.
+
+⚠ CRÍTICO — DISTINGUIR COTAS EXTERIORES vs INTERIORES:
+Un plano de taller siempre tiene DOS tipos de cotas:
+
+  (A) COTAS EXTERIORES del rectángulo grande (la PIEZA):
+      - Tienen flechas que apuntan a los DOS bordes EXTREMOS del rectángulo.
+      - Suelen estar dibujadas FUERA del rectángulo, debajo y a un lado.
+      - Son los números MÁS GRANDES del plano (la pieza completa).
+      - Ejemplo típico: "145" debajo del rectángulo y "80" al lateral.
+      - → Estas dos cotas son length_mm (el lado largo) y width_mm (el lado corto) de la pieza.
+
+  (B) COTAS INTERIORES de los features (slots / agujeros / recortes):
+      - Están DENTRO del rectángulo o muy cerca de cada feature.
+      - Hay cotas de DIMENSIÓN del feature (su largo/ancho/diámetro).
+      - Hay cotas de POSICIÓN del feature (distancias desde los bordes
+        de la pieza hasta el feature).
+      - Ejemplo típico para un slot centrado: "30 — 60 — 55" alineadas
+        sobre el rectángulo significa "30 mm desde borde izquierdo + 60
+        mm de longitud del slot + 55 mm hasta borde derecho", lo que
+        SUMA 145 mm (la longitud total de la pieza, que coincide con la
+        cota exterior).
+      - Verticalmente igual: "40 — 18 — 40" = 40 desde borde inferior +
+        18 ancho slot + 40 hasta borde superior = 98? no, sería el ancho
+        de la pieza si así sumara. Si las cotas internas verticales son
+        "40 — 40" y el ancho exterior es 80, el slot está centrado.
+
+  REGLA DE ORO: SIEMPRE el rectángulo exterior es la PIEZA. Sus DOS
+  cotas exteriores son length_mm × width_mm. Si la cota más grande del
+  plano (la del rectángulo exterior) está fuera del rectángulo, ESA es
+  el length de la pieza. Las cotas más pequeñas dentro son del slot.
+
+VERIFICACIÓN OBLIGATORIA antes de devolver:
+  - ¿slot.length_mm < length_mm de la pieza? (debería ser CLARAMENTE menor, típicamente ≤ 70 % de length)
+  - ¿slot.width_mm < width_mm de la pieza? (típicamente ≤ 70 % de width)
+  - Si la suma de cotas interiores (p.ej. 30 + 60 + 55) iguala UNA de
+    las cotas exteriores (145), tienes la confirmación de cuál es la
+    cota exterior y cuál es interior.
 - "TUBO Ø D×t" = tubo redondo (round_tube) de diámetro exterior D y espesor de pared t.
 - "TUBO CUADRADO L×t" = tubo cuadrado (square_tube) de lado L y espesor de pared t. Si aparece radio de esquina (R2, r=2), va en corner_radius_mm.
 - "TUBO RECTANGULAR A×B×t" = tubo rectangular (rectangular_tube) de A mm × B mm y espesor de pared t.
