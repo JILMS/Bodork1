@@ -162,13 +162,119 @@ export async function POST(req: NextRequest) {
     },
   ];
 
-  const userContent: Anthropic.Messages.ContentBlockParam[] = [
-    inputBlock,
-    { type: "text", text: hintText },
-  ];
-
   return sseResponse(async (send) => {
+    // PASS 0 — outer-rectangle dimensions only.
+    // Many plans confuse Claude because it tries to read all cotas
+    // (exterior + interior of slots/holes) at once. Splitting the
+    // job in two makes each step very simple and almost impossible
+    // to get wrong. Pass 0: "look at the plan, identify the OUTER
+    // rectangle of each piece, return ONLY length_mm and width_mm".
+    send("stage", { stage: "outer_dims" });
+    let outerHint = "";
+    try {
+      const outerSchema = {
+        type: "object" as const,
+        required: ["pieces"],
+        properties: {
+          pieces: {
+            type: "array",
+            description:
+              "One entry per distinct rectangular piece in the plan.",
+            items: {
+              type: "object",
+              required: ["length_mm", "width_mm"],
+              properties: {
+                length_mm: {
+                  type: "number",
+                  description:
+                    "Longer outer side of the rectangle, in mm.",
+                },
+                width_mm: {
+                  type: "number",
+                  description:
+                    "Shorter outer side of the rectangle, in mm.",
+                },
+                name: { type: "string" },
+                confidence: {
+                  type: "string",
+                  enum: ["alta", "media", "baja"],
+                },
+              },
+            },
+          },
+        },
+      };
+      const outerSystem: Anthropic.Messages.TextBlockParam[] = [
+        {
+          type: "text",
+          text:
+            "Eres un inspector de planos de taller. Tu ÚNICA tarea ahora " +
+            "es identificar el RECTÁNGULO EXTERIOR de cada pieza. NO mires " +
+            "agujeros, slots ni recortes. Mira sólo las cotas con flechas " +
+            "que apuntan a los bordes del rectángulo grande — esas son las " +
+            "dimensiones de la pieza. Devuelve length_mm = cota más larga, " +
+            "width_mm = cota más corta. Marca confidence='baja' si la foto " +
+            "está borrosa o tienes dudas. Usa SIEMPRE submit_outer.",
+          cache_control: { type: "ephemeral" },
+        },
+      ];
+      const outerResp = await anthropic.messages.create({
+        model: "claude-opus-4-7",
+        max_tokens: 2000,
+        thinking: { type: "adaptive" },
+        output_config: { effort: "medium" },
+        system: outerSystem,
+        tools: [
+          {
+            name: "submit_outer",
+            description: "Entrega las dimensiones exteriores.",
+            input_schema:
+              outerSchema as unknown as Anthropic.Messages.Tool.InputSchema,
+          },
+        ],
+        tool_choice: { type: "auto" },
+        messages: [{ role: "user", content: [inputBlock] }],
+      });
+      const outerTool = outerResp.content.find(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+      );
+      if (outerTool) {
+        const data = outerTool.input as {
+          pieces?: Array<{
+            length_mm?: number;
+            width_mm?: number;
+            name?: string;
+            confidence?: string;
+          }>;
+        };
+        if (data.pieces && data.pieces.length > 0) {
+          outerHint =
+            "RECTÁNGULOS EXTERIORES YA IDENTIFICADOS (úsalos como length × width de cada pieza, NO los confundas con cotas de slots):\n" +
+            data.pieces
+              .map(
+                (p, i) =>
+                  `  - Pieza ${i + 1}${p.name ? ` (${p.name})` : ""}: ` +
+                  `${p.length_mm ?? "?"} × ${p.width_mm ?? "?"} mm` +
+                  (p.confidence ? ` [confianza: ${p.confidence}]` : ""),
+              )
+              .join("\n");
+        }
+      }
+    } catch {
+      // Best-effort. If pass 0 fails, pass 1 still runs with full prompt.
+    }
+
     send("stage", { stage: "calling_claude" });
+
+    // Build the user content for pass 1, injecting the outer-rect
+    // dimensions from pass 0 if we have them.
+    const pass1UserContent: Anthropic.Messages.ContentBlockParam[] = [
+      inputBlock,
+      { type: "text", text: hintText },
+    ];
+    if (outerHint) {
+      pass1UserContent.push({ type: "text", text: outerHint });
+    }
 
     let response: Anthropic.Messages.Message;
     try {
@@ -184,7 +290,7 @@ export async function POST(req: NextRequest) {
         system: baseSystem,
         tools,
         tool_choice: { type: "auto" },
-        messages: [{ role: "user", content: userContent }],
+        messages: [{ role: "user", content: pass1UserContent }],
       });
     } catch (e) {
       send("error", {
@@ -208,7 +314,7 @@ export async function POST(req: NextRequest) {
           tools,
           tool_choice: { type: "tool", name: "submit_drawing" },
           messages: [
-            { role: "user", content: userContent },
+            { role: "user", content: pass1UserContent },
             {
               role: "assistant",
               content: response.content.filter(

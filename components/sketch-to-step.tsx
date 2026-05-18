@@ -981,11 +981,14 @@ async function readSSEDrawing(
       }
       if (eventName === "stage") {
         const stage = (data as { stage?: string }).stage;
-        if (stage === "calling_claude") onStage("Razonando con Opus 4.7…");
+        if (stage === "outer_dims")
+          onStage("1/3 · Midiendo el contorno exterior…");
+        if (stage === "calling_claude")
+          onStage("2/3 · Leyendo features internos…");
         if (stage === "fallback_force_tool")
           onStage("Reintentando para forzar el tool…");
         if (stage === "verifying")
-          onStage("Verificando con un 2º pase de Opus…");
+          onStage("3/3 · Verificación final…");
       } else if (eventName === "done") {
         result = { drawing: (data as { drawing: unknown }).drawing };
       } else if (eventName === "error") {
