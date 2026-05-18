@@ -120,6 +120,7 @@ export default function SketchToStep() {
   const [error, setError] = useState<string | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [uploaded, setUploaded] = useState<{
+    file: File;
     name: string;
     size: number;
     url: string;
@@ -232,6 +233,7 @@ export default function SketchToStep() {
       setUploaded((prev) => {
         if (prev) URL.revokeObjectURL(prev.url);
         return {
+          file,
           name: file.name,
           size: file.size,
           url: URL.createObjectURL(file),
@@ -587,34 +589,57 @@ export default function SketchToStep() {
           <Card title="1 · Subir plano">
             <Dropzone onFile={handleFile} disabled={isWorking} />
             {uploaded && (
-              <button
-                type="button"
-                onClick={() => setPreviewOpen(true)}
-                className="mt-3 flex w-full items-center gap-3 rounded-lg border border-bodor-line bg-bodor-bg/60 p-2 text-left transition-colors hover:border-bodor-accent/60"
-              >
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-bodor-bg">
-                  {uploaded.isPdf ? (
-                    <span className="text-[10px] font-bold text-bodor-accent">
-                      PDF
-                    </span>
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={uploaded.url}
-                      alt="Plano"
-                      className="h-full w-full object-cover"
-                    />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-semibold text-bodor-text">
-                    {uploaded.name}
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewOpen(true)}
+                  className="flex w-full items-center gap-3 rounded-lg border border-bodor-line bg-bodor-bg/60 p-2 text-left transition-colors hover:border-bodor-accent/60"
+                >
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-bodor-bg">
+                    {uploaded.isPdf ? (
+                      <span className="text-[10px] font-bold text-bodor-accent">
+                        PDF
+                      </span>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={uploaded.url}
+                        alt="Plano"
+                        className="h-full w-full object-cover"
+                      />
+                    )}
                   </div>
-                  <div className="text-[10px] text-bodor-muted">
-                    {(uploaded.size / 1024).toFixed(0)} KB · pulsa para ampliar
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-semibold text-bodor-text">
+                      {uploaded.name}
+                    </div>
+                    <div className="text-[10px] text-bodor-muted">
+                      {(uploaded.size / 1024).toFixed(0)} KB · pulsa para
+                      ampliar
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleFile(uploaded.file)}
+                  disabled={isWorking}
+                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-bodor-accent/40 bg-bodor-accent/10 px-3 text-xs font-semibold text-bodor-accent transition-colors hover:bg-bodor-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                  >
+                    <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                    <path d="M21 3v5h-5" />
+                  </svg>
+                  Reanalizar con la IA
+                </button>
+              </div>
             )}
           </Card>
 

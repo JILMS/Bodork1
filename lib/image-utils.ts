@@ -103,7 +103,12 @@ function makeCanvas(srcW: number, srcH: number): {
   w: number;
   h: number;
 } {
-  const maxSide = 1280;
+  // 2048 px on the longest side gives Anthropic enough detail to read
+  // small hand-written cotas reliably. A typical phone photo lands
+  // around 2-3 MB after this, well under the 5 MB per-image limit.
+  // The earlier 1280-px setting was too aggressive: thin cotas like
+  // "08" / "80" / "60" got mushed and the model misread them.
+  const maxSide = 2048;
   const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
   const w = Math.max(1, Math.round(srcW * scale));
   const h = Math.max(1, Math.round(srcH * scale));
@@ -128,13 +133,13 @@ function makeCanvas(srcW: number, srcH: number): {
 async function canvasToJpegPayload(c: CanvasLike): Promise<UploadPayload> {
   let blob: Blob;
   if (c.kind === "off") {
-    blob = await c.canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 });
+    blob = await c.canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
   } else {
     blob = await new Promise<Blob>((resolve, reject) => {
       c.canvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
         "image/jpeg",
-        0.8,
+        0.92,
       );
     });
   }
