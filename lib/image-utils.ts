@@ -21,6 +21,11 @@ const ANTHROPIC_IMAGE_MIME = new Set([
 //   without resizing so the user always gets *some* response.
 export async function fileToUploadPayload(file: File): Promise<UploadPayload> {
   if (file.type === "application/pdf") {
+    if (file.size > MAX_JPEG_BYTES) {
+      throw new Error(
+        `El PDF pesa ${(file.size / 1024 / 1024).toFixed(1)} MB. Vercel acepta hasta 2,5 MB por petición. Comprime el PDF o conviértelo a JPG antes de subirlo.`,
+      );
+    }
     const buf = await file.arrayBuffer();
     return {
       base64: bufferToBase64(new Uint8Array(buf)),
@@ -45,9 +50,13 @@ export async function fileToUploadPayload(file: File): Promise<UploadPayload> {
   }
 
   // Path 3: pass-through. If the file is already a format Anthropic
-  // accepts (jpeg / png / webp / gif), just send the bytes as-is. This
-  // means no resize, slightly bigger upload, but the flow keeps working.
-  if (ANTHROPIC_IMAGE_MIME.has(file.type)) {
+  // accepts (jpeg / png / webp / gif) AND it fits the Vercel body
+  // limit, send the bytes as-is. Otherwise we have no fallback and
+  // the throw below reports a clear error.
+  if (
+    ANTHROPIC_IMAGE_MIME.has(file.type) &&
+    file.size <= MAX_JPEG_BYTES
+  ) {
     const buf = await file.arrayBuffer();
     return {
       base64: bufferToBase64(new Uint8Array(buf)),
@@ -130,19 +139,32 @@ function makeCanvas(srcW: number, srcH: number): {
   return { canvas: { kind: "html", canvas: c }, ctx, w, h };
 }
 
-async function canvasToJpegPayload(c: CanvasLike): Promise<UploadPayload> {
-  let blob: Blob;
+// Vercel serverless functions reject request bodies >4 MB. base64
+// inflates the JPEG by ~33 %, so we cap the JPEG itself at 2.5 MB.
+// If the first encode is bigger we drop the quality progressively.
+const MAX_JPEG_BYTES = 2_500_000;
+const QUALITY_LADDER = [0.92, 0.85, 0.75, 0.65, 0.55];
+
+async function encodeCanvas(c: CanvasLike, q: number): Promise<Blob> {
   if (c.kind === "off") {
-    blob = await c.canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
-  } else {
-    blob = await new Promise<Blob>((resolve, reject) => {
-      c.canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
-        "image/jpeg",
-        0.92,
-      );
-    });
+    return c.canvas.convertToBlob({ type: "image/jpeg", quality: q });
   }
+  return new Promise<Blob>((resolve, reject) => {
+    c.canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
+      "image/jpeg",
+      q,
+    );
+  });
+}
+
+async function canvasToJpegPayload(c: CanvasLike): Promise<UploadPayload> {
+  let blob: Blob | null = null;
+  for (const q of QUALITY_LADDER) {
+    blob = await encodeCanvas(c, q);
+    if (blob.size <= MAX_JPEG_BYTES) break;
+  }
+  if (!blob) throw new Error("No se pudo comprimir la imagen.");
   const buf = await blob.arrayBuffer();
   return {
     base64: bufferToBase64(new Uint8Array(buf)),
