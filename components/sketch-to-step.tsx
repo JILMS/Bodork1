@@ -119,9 +119,45 @@ export default function SketchToStep() {
   const [progress, setProgress] = useState<Progress>(INITIAL_PROGRESS);
   const [error, setError] = useState<string | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [uploaded, setUploaded] = useState<{
+    name: string;
+    size: number;
+    url: string;
+    isPdf: boolean;
+  } | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const engineBytesRef = useRef<EngineBytes | null>(null);
   engineBytesRef.current = engineBytes;
+
+  // Persist the operator's material / espesor / advanced overrides
+  // across sessions so they don't have to set them every time.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("bodor-hints-v1");
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<Hints>;
+        setHints((h) => ({ ...h, ...parsed }));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("bodor-hints-v1", JSON.stringify(hints));
+    } catch {
+      /* quota exceeded etc, ignore */
+    }
+  }, [hints]);
+
+  // Clean up the object URL when the uploaded file is replaced or
+  // the component unmounts.
+  useEffect(() => {
+    if (!uploaded) return;
+    const url = uploaded.url;
+    return () => URL.revokeObjectURL(url);
+  }, [uploaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +227,17 @@ export default function SketchToStep() {
     async (file: File) => {
       setPhase("analyzing");
       setDrawing(null);
+      // Remember the original file so we can show a thumbnail / name
+      // next to the 3D preview.
+      setUploaded((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return {
+          name: file.name,
+          size: file.size,
+          url: URL.createObjectURL(file),
+          isPdf: file.type === "application/pdf",
+        };
+      });
       setResults({});
       setSelected(0);
       setError(null);
@@ -539,6 +586,36 @@ export default function SketchToStep() {
           {/* Card 1: Upload */}
           <Card title="1 · Subir plano">
             <Dropzone onFile={handleFile} disabled={isWorking} />
+            {uploaded && (
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(true)}
+                className="mt-3 flex w-full items-center gap-3 rounded-lg border border-bodor-line bg-bodor-bg/60 p-2 text-left transition-colors hover:border-bodor-accent/60"
+              >
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-bodor-bg">
+                  {uploaded.isPdf ? (
+                    <span className="text-[10px] font-bold text-bodor-accent">
+                      PDF
+                    </span>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={uploaded.url}
+                      alt="Plano"
+                      className="h-full w-full object-cover"
+                    />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-semibold text-bodor-text">
+                    {uploaded.name}
+                  </div>
+                  <div className="text-[10px] text-bodor-muted">
+                    {(uploaded.size / 1024).toFixed(0)} KB · pulsa para ampliar
+                  </div>
+                </div>
+              </button>
+            )}
           </Card>
 
           {/* Card 2: Progress (always visible after any activity) */}
@@ -688,6 +765,47 @@ export default function SketchToStep() {
         onClose={() => setSaveOpen(false)}
         onSave={handleSave}
       />
+
+      {previewOpen && uploaded && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4"
+          onClick={() => setPreviewOpen(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="flex max-h-full max-w-5xl flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 text-bodor-text">
+              <span className="truncate text-sm font-semibold">
+                {uploaded.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(false)}
+                className="rounded border border-bodor-line bg-bodor-panel px-3 py-1.5 text-xs hover:border-bodor-accent/60"
+              >
+                Cerrar
+              </button>
+            </div>
+            {uploaded.isPdf ? (
+              <iframe
+                src={uploaded.url}
+                title="Plano"
+                className="h-[80vh] w-full max-w-5xl rounded-lg border border-bodor-line bg-white"
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={uploaded.url}
+                alt="Plano original"
+                className="max-h-[85vh] max-w-full rounded-lg border border-bodor-line object-contain"
+              />
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
