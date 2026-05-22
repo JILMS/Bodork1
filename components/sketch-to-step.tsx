@@ -160,6 +160,67 @@ export default function SketchToStep() {
     return () => URL.revokeObjectURL(url);
   }, [uploaded]);
 
+  // Persist the analyzed drawing + the uploaded image to localStorage
+  // so that backgrounding the browser on mobile (which reloads the
+  // page from scratch and wipes React state) doesn't lose the work —
+  // and crucially doesn't force a paid re-analysis. We restore on
+  // mount and let the operator press "Construir 3D" again (free,
+  // local OCC) to rebuild the mesh.
+  useEffect(() => {
+    try {
+      const rawDrawing = localStorage.getItem("bodor-drawing-v1");
+      const rawImg = localStorage.getItem("bodor-image-v1");
+      if (rawDrawing) {
+        const d = JSON.parse(rawDrawing) as Drawing;
+        if (d?.parts?.length) {
+          setDrawing(d);
+          setPhase("awaiting_review");
+        }
+      }
+      if (rawImg) {
+        const meta = JSON.parse(rawImg) as {
+          name: string;
+          size: number;
+          isPdf: boolean;
+          dataUrl: string;
+        };
+        // Recreate a blob URL from the stored data URL so the preview
+        // works. The File object can't be restored, so "Reanalizar"
+        // won't be available after a reload — but the drawing is
+        // already cached, so that's fine.
+        fetch(meta.dataUrl)
+          .then((r) => r.blob())
+          .then((blob) => {
+            const file = new File([blob], meta.name, {
+              type: meta.isPdf ? "application/pdf" : "image/jpeg",
+            });
+            setUploaded({
+              file,
+              name: meta.name,
+              size: meta.size,
+              url: URL.createObjectURL(blob),
+              isPdf: meta.isPdf,
+            });
+          })
+          .catch(() => {});
+      }
+    } catch {
+      /* ignore corrupt / oversized storage */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (drawing) {
+        localStorage.setItem("bodor-drawing-v1", JSON.stringify(drawing));
+      } else {
+        localStorage.removeItem("bodor-drawing-v1");
+      }
+    } catch {
+      /* quota — ignore */
+    }
+  }, [drawing]);
+
   useEffect(() => {
     let cancelled = false;
     setEngine("loading");
@@ -240,6 +301,32 @@ export default function SketchToStep() {
           isPdf: file.type === "application/pdf",
         };
       });
+      // Persist a copy of the image so it survives a mobile reload.
+      // Only store files small enough to fit localStorage (~4 MB of
+      // the ~5 MB origin quota); skip otherwise.
+      if (file.size < 3_500_000) {
+        try {
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              localStorage.setItem(
+                "bodor-image-v1",
+                JSON.stringify({
+                  name: file.name,
+                  size: file.size,
+                  isPdf: file.type === "application/pdf",
+                  dataUrl: reader.result,
+                }),
+              );
+            } catch {
+              /* quota — ignore */
+            }
+          };
+          reader.readAsDataURL(file);
+        } catch {
+          /* ignore */
+        }
+      }
       setResults({});
       setSelected(0);
       setError(null);
@@ -545,6 +632,25 @@ export default function SketchToStep() {
               ? "CAD"
               : "—";
 
+  const resetAll = () => {
+    setDrawing(null);
+    setResults({});
+    setSelected(0);
+    setError(null);
+    setPhase("idle");
+    setProgress(INITIAL_PROGRESS);
+    setUploaded((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+    try {
+      localStorage.removeItem("bodor-drawing-v1");
+      localStorage.removeItem("bodor-image-v1");
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <main className="min-h-[100dvh] bg-bodor-bg">
       {/* Top bar */}
@@ -578,6 +684,16 @@ export default function SketchToStep() {
           <div className="flex items-center gap-3">
             <EngineBadge status={engine} />
             <PhaseBadge phase={phase} />
+            {(drawing || uploaded) && !isWorking && (
+              <button
+                type="button"
+                onClick={resetAll}
+                title="Empezar de nuevo"
+                className="rounded-lg border border-bodor-line px-2.5 py-1.5 text-[11px] text-bodor-muted hover:border-bodor-accent/50 hover:text-bodor-text"
+              >
+                Nuevo
+              </button>
+            )}
           </div>
         </div>
       </header>
