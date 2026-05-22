@@ -65,10 +65,10 @@ const INITIAL_PROGRESS: Progress = {
     },
     analyze: {
       id: "analyze",
-      label: "Interpretar plano con IA (Opus 4.7 ×2)",
+      label: "Interpretar plano con IA (Opus 4.7)",
       state: "pending",
-      estimateRangeSec: [20, 60],
-      note: "Opus 4.7 effort=high + verificación 2º pase",
+      estimateRangeSec: [15, 45],
+      note: "Contorno + features (2 pasadas)",
     },
     engine: {
       id: "engine",
@@ -1007,13 +1007,11 @@ async function readSSEDrawing(
       if (eventName === "stage") {
         const stage = (data as { stage?: string }).stage;
         if (stage === "outer_dims")
-          onStage("1/3 · Midiendo el contorno exterior…");
+          onStage("1/2 · Midiendo el contorno exterior…");
         if (stage === "calling_claude")
-          onStage("2/3 · Leyendo features internos…");
+          onStage("2/2 · Leyendo features internos…");
         if (stage === "fallback_force_tool")
           onStage("Reintentando para forzar el tool…");
-        if (stage === "verifying")
-          onStage("3/3 · Verificación final…");
       } else if (eventName === "done") {
         result = { drawing: (data as { drawing: unknown }).drawing };
       } else if (eventName === "error") {
