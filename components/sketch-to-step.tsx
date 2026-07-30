@@ -13,6 +13,10 @@ import {
   type StepInfo,
 } from "@/components/progress-stepper";
 import { OverallProgress } from "@/components/overall-progress";
+import {
+  PerforatedTubeCard,
+  type PerforatedTubeArgs,
+} from "@/components/perforated-tube-card";
 import { fileToUploadPayload } from "@/lib/image-utils";
 import type { Drawing, PartSpec } from "@/lib/part-spec";
 import type { Mesh } from "@/lib/occ/mesh-from-shape";
@@ -461,6 +465,141 @@ export default function SketchToStep() {
     [engine, hints],
   );
 
+  // Special generator: hex-perforated round tube. Skips the IA
+  // entirely and calls the OCC worker directly. The result is
+  // wrapped in a synthetic Drawing so it slots into the existing
+  // "select part → view → save" pipeline.
+  const handlePerforatedTube = useCallback(
+    async (args: PerforatedTubeArgs) => {
+      setPhase("building");
+      setDrawing(null);
+      setResults({});
+      setSelected(0);
+      setError(null);
+      setProgress(() => {
+        const base = INITIAL_PROGRESS;
+        return updateStep(
+          updateStep(base, "compress", { state: "done", elapsedMs: 0 }),
+          "analyze",
+          {
+            state: "done",
+            elapsedMs: 0,
+            note: "Sin IA — generador paramétrico",
+          },
+        );
+      });
+
+      const markActive = (id: StepId, note?: string) =>
+        setProgress((p) =>
+          updateStep(p, id, { state: "active", ...(note ? { note } : {}) }),
+        );
+      const markDone = (id: StepId, elapsedMs: number, note?: string) =>
+        setProgress((p) =>
+          updateStep(p, id, {
+            state: "done",
+            elapsedMs,
+            ...(note ? { note } : {}),
+          }),
+        );
+
+      try {
+        const worker = getOccWorker();
+        await worker.clearCache();
+
+        let engineStart: number | null = null;
+        let buildStart = Date.now();
+        const proxied = Comlink.proxy((evt: WorkerProgress) => {
+          switch (evt.kind) {
+            case "loading_engine":
+              engineStart = Date.now();
+              markActive("engine");
+              break;
+            case "engine_progress":
+              setEngineBytes({
+                loaded: evt.loaded,
+                total: evt.total,
+                files: evt.files,
+              });
+              break;
+            case "engine_ready":
+              if (engineStart !== null)
+                markDone("engine", Date.now() - engineStart);
+              else markDone("engine", 0, "Ya estaba en caché");
+              setEngine("ready");
+              buildStart = Date.now();
+              break;
+            case "building_part":
+              buildStart = Date.now();
+              markActive("build", "Cortando patrón hexagonal…");
+              break;
+            case "tessellating":
+              setProgress((p) =>
+                updateStep(p, "build", {
+                  note: "Mallando para el visor…",
+                }),
+              );
+              break;
+          }
+        });
+
+        const out = await worker.buildPerforatedTube(args, 0, proxied);
+        markDone(
+          "build",
+          Date.now() - buildStart,
+          `${out.hole_count.toLocaleString("es-ES")} agujeros`,
+        );
+
+        // Synthesize a Drawing with a single round_tube part so the
+        // parts list / save dialog / viewer all work as usual. The
+        // holes list is left empty — the actual perforations are
+        // already baked into the cached shape.
+        const synthDrawing: Drawing = {
+          missing_fields: [],
+          parts: [
+            {
+              name: `Tubo perforado Ø${args.outer_diameter_mm} × ${args.length_mm} mm`,
+              material: hints.default_material,
+              quantity: 1,
+              notes: `${out.hole_count} agujeros Ø${args.hole_diameter_mm} en patrón hexagonal, separación ${args.edge_gap_mm} mm entre bordes`,
+              profile: {
+                kind: "round_tube",
+                length_mm: args.length_mm,
+                outer_diameter_mm: args.outer_diameter_mm,
+                wall_thickness_mm: args.wall_thickness_mm,
+                holes: [],
+              },
+            },
+          ],
+        };
+        setDrawing(synthDrawing);
+        setResults({
+          0: {
+            mesh: out.mesh,
+            watertight: out.watertight,
+            builtSpec: synthDrawing.parts[0],
+          },
+        });
+        setProgress((p) =>
+          updateStep(p, "step", {
+            state: "pending",
+            note: "Pulsa Guardar archivo cuando estés listo",
+          }),
+        );
+        setPhase("ready");
+      } catch (e) {
+        const msg = (e as Error).message;
+        setError(msg);
+        setProgress((p) => {
+          const activeId =
+            p.order.find((id) => p.steps[id].state === "active") ?? "build";
+          return updateStep(p, activeId, { state: "error", error: msg });
+        });
+        setPhase("error");
+      }
+    },
+    [hints.default_material],
+  );
+
   const handleBuild = useCallback(async () => {
     if (!drawing) return;
     setPhase("building");
@@ -757,6 +896,17 @@ export default function SketchToStep() {
                 </button>
               </div>
             )}
+          </Card>
+
+          {/* Card 1b: Perforated tube generator (no AI, parametric). */}
+          <Card
+            title="Tubo perforado (sin IA)"
+            subtitle="Generador rápido"
+          >
+            <PerforatedTubeCard
+              onGenerate={handlePerforatedTube}
+              disabled={isWorking || engine !== "ready"}
+            />
           </Card>
 
           {/* Card 2: Progress (always visible after any activity) */}

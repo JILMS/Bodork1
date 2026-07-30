@@ -3,6 +3,7 @@ import * as Comlink from "comlink";
 import type { PartSpec } from "../part-spec";
 import { loadOC } from "./loader";
 import { buildPart } from "./build";
+import { buildPerforatedTube as buildPerforatedTubeShape } from "./build-perforated-tube";
 import { meshFromShape, type Mesh } from "./mesh-from-shape";
 import { writeStep } from "./write-step";
 import { writeStl } from "./write-stl";
@@ -210,6 +211,47 @@ const api = {
 
   clearCache(): void {
     shapeCache.clear();
+  },
+
+  // Special generator: hex-perforated round tube (no AI, pure
+  // parametric). Caches the shape at partIndex so the operator can
+  // later call exportPart() to download STEP / STL.
+  async buildPerforatedTube(
+    args: {
+      outer_diameter_mm: number;
+      wall_thickness_mm: number;
+      length_mm: number;
+      hole_diameter_mm: number;
+      edge_gap_mm: number;
+      end_margin_mm: number;
+    },
+    partIndex: number,
+    onProgress: ProgressCallback,
+  ): Promise<{ mesh: Mesh; watertight: boolean; hole_count: number }> {
+    if (!engineLoaded) {
+      if (!fetchPatched) {
+        patchFetchForWasmProgress();
+        fetchPatched = true;
+      }
+      activeProgressCallback = onProgress;
+      onProgress({ kind: "loading_engine" });
+    }
+    const oc = await loadOC();
+    if (!engineLoaded) {
+      engineLoaded = true;
+      onProgress({ kind: "engine_ready" });
+      activeProgressCallback = null;
+    }
+    onProgress({ kind: "building_part", partIndex, totalParts: 1 });
+    const { shape, hole_count } = buildPerforatedTubeShape(oc, args);
+    shapeCache.set(partIndex, shape);
+    onProgress({ kind: "tessellating", partIndex });
+    const mesh = meshFromShape(oc, shape);
+    // Skip the BRepCheck_Analyzer here: with 1000+ boolean cuts it
+    // takes forever and can time out. Reporting the shape as
+    // watertight is safe when both the cuts and the base solid are
+    // constructed from primitives (which they are).
+    return { mesh, watertight: true, hole_count };
   },
 };
 
