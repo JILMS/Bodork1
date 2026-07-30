@@ -402,24 +402,52 @@ export default function SketchToStep() {
               );
               await new Promise((r) => setTimeout(r, 1500 * attempt));
             }
+            // Stall detector: if we don't receive any bytes for
+            // STALL_MS the connection is considered dead — the fetch
+            // is aborted and the outer loop retries. Every SSE event
+            // (or keepalive) resets the timer. This is what stops the
+            // "app hangs on step 2 for 30 minutes" bug.
+            const STALL_MS = 40_000;
+            const abortController = new AbortController();
+            let stallTimer: ReturnType<typeof setTimeout> | null = null;
+            const resetStall = () => {
+              if (stallTimer) clearTimeout(stallTimer);
+              stallTimer = setTimeout(() => {
+                abortController.abort();
+              }, STALL_MS);
+            };
+            resetStall();
             const res = await fetch("/api/analyze", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: payload,
+              signal: abortController.signal,
             });
             if (!res.ok || !res.body) {
+              if (stallTimer) clearTimeout(stallTimer);
               throw new Error(`Error ${res.status}`);
             }
-            sseResult = await readSSEDrawing(res, (note) =>
-              setProgress((p) =>
-                updateStep(p, "analyze", { state: "active", note }),
-              ),
-            );
+            try {
+              sseResult = await readSSEDrawing(
+                res,
+                (note) => {
+                  resetStall();
+                  setProgress((p) =>
+                    updateStep(p, "analyze", { state: "active", note }),
+                  );
+                },
+                abortController.signal,
+              );
+            } finally {
+              if (stallTimer) clearTimeout(stallTimer);
+            }
             break;
           } catch (e) {
             lastNetError = e as Error;
             const msg = lastNetError.message.toLowerCase();
             const isNetErr =
+              msg.includes("stalled") ||
+              msg.includes("aborted") ||
               msg.includes("network") ||
               msg.includes("fetch") ||
               msg.includes("failed to fetch") ||
@@ -1243,13 +1271,33 @@ function pletinaToFakeAngle(p: PartSpec): PartSpec {
 async function readSSEDrawing(
   res: Response,
   onStage: (note: string) => void,
+  // Aborted from outside if the fetch stalls (no bytes for too long)
+  // so we can cleanly stop reading and let the caller retry.
+  abortSignal?: AbortSignal,
 ): Promise<{ drawing?: unknown; error?: string }> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let result: { drawing?: unknown; error?: string } = {};
+  if (abortSignal) {
+    abortSignal.addEventListener("abort", () => {
+      try {
+        reader.cancel();
+      } catch {
+        /* ignore */
+      }
+    });
+  }
   for (;;) {
-    const { done, value } = await reader.read();
+    let readResult: ReadableStreamReadResult<Uint8Array>;
+    try {
+      readResult = await reader.read();
+    } catch (e) {
+      // reader.cancel() throws here — treat as abort signal.
+      if (abortSignal?.aborted) throw new Error("stalled");
+      throw e;
+    }
+    const { done, value } = readResult;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const events = buffer.split("\n\n");
