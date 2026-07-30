@@ -2,7 +2,7 @@ import type { OC, ShapeHandle } from "./types";
 import { makeCylinder } from "./geom-utils";
 
 // Callback fired from inside the builder so the worker can forward a
-// "building_part" progress event with a note like "Cortando 300/1380".
+// "batch_progress" event with a note like "Cortando 300/1380".
 export type PerforatedProgress = (done: number, total: number) => void;
 
 export type PerforatedTubeArgs = {
@@ -15,11 +15,11 @@ export type PerforatedTubeArgs = {
 };
 
 // Builds a hollow round tube perforated with a HEXAGONAL pattern of
-// round holes (perforated tubes for filters / mufflers / dust
-// collectors). OCC WASM is slow with many booleans, so we chunk the
-// holes into batches of BATCH_SIZE, run one BRepAlgoAPI_Cut per
-// batch, and call `onProgress` after each batch so the UI actually
-// moves.
+// round holes. Uses OCC's BATCHED Boolean API
+// (BRepAlgoAPI_Cut with SetArguments/SetTools) so each cut processes
+// hundreds of tools at once against the same argument — OCC builds
+// the intersection graph once per batch instead of once per hole.
+// We still chunk into a handful of batches so the UI shows progress.
 export function buildPerforatedTube(
   oc: OC,
   args: PerforatedTubeArgs,
@@ -54,8 +54,7 @@ export function buildPerforatedTube(
   const overshoot = wall * 0.6 + 1;
   const drillLen = D + overshoot * 2;
 
-  // Precompute all drill tools. Storing 1000+ ShapeHandles is fine —
-  // they're WASM handles, not heavy meshes.
+  // Precompute all drill tools (WASM handles, not heavy meshes).
   const tools: ShapeHandle[] = [];
   for (let r = 0; r < nRows; r++) {
     const x = firstRowX + r * rowSpacing;
@@ -75,13 +74,16 @@ export function buildPerforatedTube(
   }
 
   const total = tools.length;
-  const BATCH_SIZE = 40;
+  // 500 tools per batch: OCC's batched Boolean API handles this in
+  // ONE intersection-graph build, so wall-time per batch is roughly
+  // constant, not O(N²) as it was with 40-tool compound cuts. With
+  // ~1500 holes we get 3 progress updates, which is plenty.
+  const BATCH_SIZE = 500;
   onProgress?.(0, total);
 
   for (let i = 0; i < total; i += BATCH_SIZE) {
     const batch = tools.slice(i, i + BATCH_SIZE);
-    const compound = buildCompound(oc, batch);
-    body = cutSingle(oc, body, compound);
+    body = cutBatched(oc, body, batch);
     onProgress?.(Math.min(i + BATCH_SIZE, total), total);
   }
 
@@ -98,12 +100,28 @@ function cutSingle(
   return op.Shape();
 }
 
-function buildCompound(oc: OC, shapes: ShapeHandle[]): ShapeHandle {
-  const compound = new oc.TopoDS_Compound();
-  const builder = new oc.BRep_Builder();
-  builder.MakeCompound(compound);
-  for (const s of shapes) {
-    builder.Add(compound, s);
+// Batched Boolean cut: base − (tool1, tool2, …, toolN) using OCC's
+// SetArguments/SetTools API. Much faster than repeated pairwise cuts
+// because the pave filler / intersection graph is computed once.
+function cutBatched(
+  oc: OC,
+  base: ShapeHandle,
+  toolShapes: ShapeHandle[],
+): ShapeHandle {
+  const argsList = new oc.TopTools_ListOfShape_1();
+  argsList.Append_1(base);
+
+  const toolsList = new oc.TopTools_ListOfShape_1();
+  for (const t of toolShapes) toolsList.Append_1(t);
+
+  const op = new oc.BRepAlgoAPI_Cut_1();
+  op.SetArguments(argsList);
+  op.SetTools(toolsList);
+  try {
+    op.SetRunParallel(true);
+  } catch {
+    // Older bindings may not expose this — safe to ignore.
   }
-  return compound;
+  op.Build();
+  return op.Shape();
 }
