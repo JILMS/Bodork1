@@ -1,27 +1,29 @@
 import type { OC, ShapeHandle } from "./types";
 import { makeCylinder } from "./geom-utils";
 
-// Builds a hollow round tube (outer_diameter × wall_thickness × length)
-// perforated with a HEXAGONAL / staggered pattern of round holes,
-// like the perforated stainless-steel filter tubes used in mufflers
-// and dust collectors. All perforations are subtracted in a SINGLE
-// boolean cut against a TopoDS_Compound of tools — critical for
-// performance when the pattern has 1000+ holes; the iterative
-// per-hole Cut we use elsewhere would take 20+ minutes.
+// Callback fired from inside the builder so the worker can forward a
+// "building_part" progress event with a note like "Cortando 300/1380".
+export type PerforatedProgress = (done: number, total: number) => void;
+
+export type PerforatedTubeArgs = {
+  outer_diameter_mm: number;
+  wall_thickness_mm: number;
+  length_mm: number;
+  hole_diameter_mm: number;
+  edge_gap_mm: number;
+  end_margin_mm: number;
+};
+
+// Builds a hollow round tube perforated with a HEXAGONAL pattern of
+// round holes (perforated tubes for filters / mufflers / dust
+// collectors). OCC WASM is slow with many booleans, so we chunk the
+// holes into batches of BATCH_SIZE, run one BRepAlgoAPI_Cut per
+// batch, and call `onProgress` after each batch so the UI actually
+// moves.
 export function buildPerforatedTube(
   oc: OC,
-  args: {
-    outer_diameter_mm: number;
-    wall_thickness_mm: number;
-    length_mm: number;
-    hole_diameter_mm: number;
-    // Distance between hole EDGES (typical shop convention). Pitch
-    // center-to-center = hole_diameter_mm + edge_gap_mm.
-    edge_gap_mm: number;
-    // How much of each end to leave un-perforated (10-15 mm is
-    // typical to give the CAM a place to hold the tube).
-    end_margin_mm: number;
-  },
+  args: PerforatedTubeArgs,
+  onProgress?: PerforatedProgress,
 ): { shape: ShapeHandle; hole_count: number } {
   const D = args.outer_diameter_mm;
   const wall = args.wall_thickness_mm;
@@ -34,33 +36,26 @@ export function buildPerforatedTube(
   const rInner = Math.max(rOuter - wall, 0.05);
   const holeR = holeD / 2;
 
-  // Hollow tube along X axis: outer − inner cylinder.
   const outer = makeCylinder(oc, [0, 0, 0], [1, 0, 0], rOuter, length);
   const inner = makeCylinder(oc, [0, 0, 0], [1, 0, 0], rInner, length);
-  const tube = cutSingle(oc, outer, inner);
+  let body = cutSingle(oc, outer, inner);
 
-  // Pitch center-to-center along the circumference.
   const pitch = holeD + gap;
   const circumference = Math.PI * D;
-  // Snap to a whole number of holes around the tube so the pattern
-  // closes cleanly (no seam gap).
   const nCirc = Math.max(1, Math.round(circumference / pitch));
   const arcPitchRad = (2 * Math.PI) / nCirc;
-  // Row spacing along the axis: pitch × √3/2 for hex close-pack.
   const rowSpacing = pitch * (Math.sqrt(3) / 2);
 
-  // First and last hole centres sit at least end_margin from the
-  // corresponding tube end, plus half a hole so the edge of the
-  // hole clears the margin.
   const firstRowX = margin + holeR;
   const lastRowX = length - margin - holeR;
   const usableLen = lastRowX - firstRowX;
   const nRows = Math.max(0, Math.floor(usableLen / rowSpacing) + 1);
 
-  // Build all hole tools; alternate rows are offset by half the
-  // circumferential pitch (hexagonal staggering).
   const overshoot = wall * 0.6 + 1;
   const drillLen = D + overshoot * 2;
+
+  // Precompute all drill tools. Storing 1000+ ShapeHandles is fine —
+  // they're WASM handles, not heavy meshes.
   const tools: ShapeHandle[] = [];
   for (let r = 0; r < nRows; r++) {
     const x = firstRowX + r * rowSpacing;
@@ -69,7 +64,6 @@ export function buildPerforatedTube(
       const theta = c * arcPitchRad + rowOffset;
       const ny = Math.cos(theta);
       const nz = Math.sin(theta);
-      // Origin just outside the outer surface; drill inwards.
       const origin: [number, number, number] = [
         x,
         ny * (rOuter + overshoot),
@@ -80,12 +74,18 @@ export function buildPerforatedTube(
     }
   }
 
-  // ONE boolean cut against a compound of all drill tools. This is
-  // orders of magnitude faster than iterating BRepAlgoAPI_Cut.
-  const compound = buildCompound(oc, tools);
-  const perforated = cutSingle(oc, tube, compound);
+  const total = tools.length;
+  const BATCH_SIZE = 40;
+  onProgress?.(0, total);
 
-  return { shape: perforated, hole_count: tools.length };
+  for (let i = 0; i < total; i += BATCH_SIZE) {
+    const batch = tools.slice(i, i + BATCH_SIZE);
+    const compound = buildCompound(oc, batch);
+    body = cutSingle(oc, body, compound);
+    onProgress?.(Math.min(i + BATCH_SIZE, total), total);
+  }
+
+  return { shape: body, hole_count: total };
 }
 
 function cutSingle(

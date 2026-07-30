@@ -14,6 +14,12 @@ export type WorkerProgress =
   | { kind: "engine_progress"; loaded: number; total: number; files: number }
   | { kind: "engine_ready" }
   | { kind: "building_part"; partIndex: number; totalParts: number }
+  | {
+      kind: "batch_progress";
+      partIndex: number;
+      done: number;
+      total: number;
+    }
   | { kind: "tessellating"; partIndex: number };
 
 export type BuildPartResponse = {
@@ -243,7 +249,18 @@ const api = {
       activeProgressCallback = null;
     }
     onProgress({ kind: "building_part", partIndex, totalParts: 1 });
-    const { shape, hole_count } = buildPerforatedTubeShape(oc, args);
+    const { shape, hole_count } = buildPerforatedTubeShape(
+      oc,
+      args,
+      (done, total) => {
+        onProgress({
+          kind: "batch_progress",
+          partIndex,
+          done,
+          total,
+        });
+      },
+    );
     shapeCache.set(partIndex, shape);
     onProgress({ kind: "tessellating", partIndex });
     const mesh = meshFromShape(oc, shape);

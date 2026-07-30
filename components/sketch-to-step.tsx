@@ -560,6 +560,17 @@ export default function SketchToStep() {
               buildStart = Date.now();
               markActive("build", "Cortando patrón hexagonal…");
               break;
+            case "batch_progress":
+              setProgress((p) =>
+                updateStep(p, "build", {
+                  state: "active",
+                  note: `Cortando agujeros ${evt.done.toLocaleString(
+                    "es-ES",
+                  )} / ${evt.total.toLocaleString("es-ES")}`,
+                  progress: { loaded: evt.done, total: evt.total },
+                }),
+              );
+              break;
             case "tessellating":
               setProgress((p) =>
                 updateStep(p, "build", {
@@ -679,6 +690,17 @@ export default function SketchToStep() {
             markActive(
               "build",
               `Pieza ${evt.partIndex + 1} de ${evt.totalParts}`,
+            );
+            break;
+          case "batch_progress":
+            setProgress((p) =>
+              updateStep(p, "build", {
+                state: "active",
+                note: `Cortando agujeros ${evt.done.toLocaleString(
+                  "es-ES",
+                )} / ${evt.total.toLocaleString("es-ES")}`,
+                progress: { loaded: evt.done, total: evt.total },
+              }),
             );
             break;
           case "tessellating":
