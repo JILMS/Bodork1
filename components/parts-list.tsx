@@ -71,5 +71,10 @@ function featureCounts(p: PartSpec): string {
   } else if (pr.kind === "round_tube" || pr.kind === "square_tube" || pr.kind === "rectangular_tube") {
     if (pr.holes.length) parts.push(`${pr.holes.length} agujero${pr.holes.length === 1 ? "" : "s"}`);
   }
+  // Parts built by the parametric perforated-tube generator bake the
+  // 1500+ holes straight into the OCC shape, so the profile itself
+  // carries an empty holes list. The real hole count lives in `notes`
+  // — prefer that over the misleading "sin perforaciones" fallback.
+  if (!parts.length && p.notes) return p.notes;
   return parts.length ? parts.join(", ") : "sin perforaciones";
 }

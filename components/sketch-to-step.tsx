@@ -1063,6 +1063,14 @@ export default function SketchToStep() {
                   ? "✓ Sólido estanco, listo para la K1"
                   : "⚠ Posible no-estanco — revisa antes de cortar"}
               </div>
+              {perforatedMode && currentResult.builtSpec?.notes && (
+                <div className="mb-2 rounded border border-bodor-accent/40 bg-bodor-accent/10 px-2 py-1.5 text-[11px] text-bodor-text">
+                  El preview 3D es una chapa lisa por rendimiento del móvil,
+                  pero <strong>el STEP descargado contiene los{" "}
+                  {currentResult.builtSpec.notes.replace(/^(\d[\d.,]*).*/, "$1")}
+                  {" "}agujeros troquelados</strong> y va listo al K1.
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => setSaveOpen(true)}
