@@ -41,6 +41,7 @@ export function PerforatedTubeCard({ onGenerate, disabled }: Props) {
       total: nCirc * nRows,
       arcPitch: circumference / nCirc,
       rowSpacing,
+      sheetWidth: circumference,
     };
   }, [args]);
 
@@ -52,9 +53,10 @@ export function PerforatedTubeCard({ onGenerate, disabled }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-[11px] text-bodor-muted">
-        Generador rápido de tubo redondo con patrón hexagonal de agujeros
-        (tipo filtro / silenciador). No usa la IA, así que no consume
-        saldo.
+        Genera la <strong>chapa desarrollada</strong> del tubo
+        (rectángulo plano) con el patrón hexagonal de agujeros. El K1
+        corta el rectángulo; el operario la enrolla y suelda el
+        canto para formar el tubo. Sin IA, sin consumir saldo.
       </p>
 
       <div className="grid grid-cols-2 gap-2">
@@ -96,13 +98,17 @@ export function PerforatedTubeCard({ onGenerate, disabled }: Props) {
 
       <div className="rounded-lg border border-bodor-line bg-bodor-panel/40 p-3 text-[11px] text-bodor-text">
         <div>
+          Chapa <strong>{args.length_mm} × {preview.sheetWidth.toFixed(1)} mm</strong>
+          {" "}(largo × desarrollo)
+        </div>
+        <div>
           <strong>{preview.total.toLocaleString("es-ES")}</strong> agujeros
           totales
         </div>
         <div className="text-bodor-muted">
-          {preview.nCirc} por vuelta · {preview.nRows} anillos · paso
+          {preview.nCirc} por vuelta · {preview.nRows} filas · paso
           circular {preview.arcPitch.toFixed(2)} mm · distancia entre
-          anillos {preview.rowSpacing.toFixed(2)} mm
+          filas {preview.rowSpacing.toFixed(2)} mm
         </div>
       </div>
 
@@ -112,7 +118,7 @@ export function PerforatedTubeCard({ onGenerate, disabled }: Props) {
         disabled={disabled}
         className="h-12 rounded-lg bg-gradient-to-br from-bodor-accent to-orange-600 px-4 text-sm font-bold uppercase tracking-wider text-bodor-bg shadow-md transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        Generar tubo perforado
+        Generar chapa perforada
       </button>
     </div>
   );
