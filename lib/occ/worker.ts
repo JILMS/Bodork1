@@ -116,6 +116,59 @@ function patchFetchForWasmProgress() {
   };
 }
 
+// Manually-built preview mesh for a flat slab (length × width × thickness),
+// oriented in the XY plane starting at the origin. 12 triangles, no
+// tessellator involved — safe for arbitrarily many holes in the STEP.
+function flatSlabMesh(length: number, width: number, thickness: number): Mesh {
+  // 8 corners of the box.
+  const v: number[] = [
+    0, 0, 0,
+    length, 0, 0,
+    length, width, 0,
+    0, width, 0,
+    0, 0, thickness,
+    length, 0, thickness,
+    length, width, thickness,
+    0, width, thickness,
+  ];
+  // 6 faces × 2 triangles, CCW when looking from outside.
+  const idx: number[] = [
+    0, 2, 1, 0, 3, 2, // bottom (z=0), normal -Z
+    4, 5, 6, 4, 6, 7, // top (z=thickness), normal +Z
+    0, 1, 5, 0, 5, 4, // front (y=0), normal -Y
+    2, 3, 7, 2, 7, 6, // back (y=width), normal +Y
+    1, 2, 6, 1, 6, 5, // right (x=length), normal +X
+    0, 4, 7, 0, 7, 3, // left (x=0), normal -X
+  ];
+  const positions = new Float32Array(v);
+  const indices = new Uint32Array(idx);
+  const normals = new Float32Array(positions.length);
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3;
+    const b = indices[i + 1] * 3;
+    const c = indices[i + 2] * 3;
+    const abx = positions[b] - positions[a];
+    const aby = positions[b + 1] - positions[a + 1];
+    const abz = positions[b + 2] - positions[a + 2];
+    const acx = positions[c] - positions[a];
+    const acy = positions[c + 1] - positions[a + 1];
+    const acz = positions[c + 2] - positions[a + 2];
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    normals[a] += nx; normals[a + 1] += ny; normals[a + 2] += nz;
+    normals[b] += nx; normals[b + 1] += ny; normals[b + 2] += nz;
+    normals[c] += nx; normals[c + 1] += ny; normals[c + 2] += nz;
+  }
+  for (let i = 0; i < normals.length; i += 3) {
+    const len = Math.hypot(normals[i], normals[i + 1], normals[i + 2]) || 1;
+    normals[i] /= len;
+    normals[i + 1] /= len;
+    normals[i + 2] /= len;
+  }
+  return { positions, normals, indices };
+}
+
 function exportShape(
   oc: OC,
   shape: ShapeHandle,
@@ -263,11 +316,18 @@ const api = {
     );
     shapeCache.set(partIndex, shape);
     onProgress({ kind: "tessellating", partIndex });
-    const mesh = meshFromShape(oc, shape);
-    // Skip the BRepCheck_Analyzer here: with 1000+ boolean cuts it
-    // takes forever and can time out. Reporting the shape as
-    // watertight is safe when both the cuts and the base solid are
-    // constructed from primitives (which they are).
+    // BRepMesh_IncrementalMesh blows the WASM stack when a face has
+    // more than a few hundred hole wires (Delaunay recursion depth).
+    // Build the preview mesh by hand: a plain rectangular slab of the
+    // sheet's dimensions. The STEP file the user downloads still has
+    // every hole in it — the preview just isn't the place to render
+    // 1500+ circles on a phone.
+    const sheetWidth = Math.PI * args.outer_diameter_mm;
+    const mesh = flatSlabMesh(
+      args.length_mm,
+      sheetWidth,
+      args.wall_thickness_mm,
+    );
     return { mesh, watertight: true, hole_count };
   },
 };

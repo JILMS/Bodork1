@@ -8,11 +8,26 @@ export type Mesh = {
 
 // Tessellates an OCC shape into a triangle mesh suitable for three.js.
 // Uses BRepMesh_IncrementalMesh and iterates the faces via TopExp_Explorer.
+// If the mesher blows up (e.g. a face has too many hole wires and the
+// WASM stack overflows), we fall back to a coarser tessellation, then
+// to an empty mesh — the shape is still cached for STEP export.
 export function meshFromShape(oc: OC, shape: ShapeHandle): Mesh {
   // 0.2 mm linear deflection: small enough that 8-15 mm holes look
   // smooth (~32 facets per circle), big enough to keep mesh size sane
   // for 2 m bars. Angular deflection 0.5 rad keeps tubes acceptable.
-  new oc.BRepMesh_IncrementalMesh_2(shape, 0.2, false, 0.5, false);
+  try {
+    new oc.BRepMesh_IncrementalMesh_2(shape, 0.2, false, 0.5, false);
+  } catch {
+    try {
+      new oc.BRepMesh_IncrementalMesh_2(shape, 2.0, false, 1.0, false);
+    } catch {
+      return {
+        positions: new Float32Array(0),
+        normals: new Float32Array(0),
+        indices: new Uint32Array(0),
+      };
+    }
+  }
 
   const positions: number[] = [];
   const normals: number[] = [];
