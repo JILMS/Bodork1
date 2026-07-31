@@ -120,6 +120,13 @@ export default function SketchToStep() {
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const [selected, setSelected] = useState(0);
   const [results, setResults] = useState<Record<number, PartResult>>({});
+  // True while the current drawing was produced by the parametric
+  // perforated-tube generator (not by AI). In that mode the OCC shape
+  // is already built and cached, and the round_tube profile is only a
+  // stand-in for the parts list — so we must hide the "Construir 3D"
+  // editor button, which would otherwise call buildPart on that stand-in
+  // and overwrite the cached perforated shape with a plain hollow tube.
+  const [perforatedMode, setPerforatedMode] = useState(false);
   const [progress, setProgress] = useState<Progress>(INITIAL_PROGRESS);
   const [error, setError] = useState<string | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -174,10 +181,12 @@ export default function SketchToStep() {
     try {
       const rawDrawing = localStorage.getItem("bodor-drawing-v1");
       const rawImg = localStorage.getItem("bodor-image-v1");
+      const perfFlag = localStorage.getItem("bodor-perforated-v1");
       if (rawDrawing) {
         const d = JSON.parse(rawDrawing) as Drawing;
         if (d?.parts?.length) {
           setDrawing(d);
+          setPerforatedMode(perfFlag === "1");
           setPhase("awaiting_review");
         }
       }
@@ -224,6 +233,18 @@ export default function SketchToStep() {
       /* quota — ignore */
     }
   }, [drawing]);
+
+  useEffect(() => {
+    try {
+      if (perforatedMode) {
+        localStorage.setItem("bodor-perforated-v1", "1");
+      } else {
+        localStorage.removeItem("bodor-perforated-v1");
+      }
+    } catch {
+      /* quota — ignore */
+    }
+  }, [perforatedMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -334,6 +355,7 @@ export default function SketchToStep() {
       setResults({});
       setSelected(0);
       setError(null);
+      setPerforatedMode(false);
       setProgress(() => {
         const base = INITIAL_PROGRESS;
         if (engine === "ready") {
@@ -504,6 +526,7 @@ export default function SketchToStep() {
       setResults({});
       setSelected(0);
       setError(null);
+      setPerforatedMode(false);
       setProgress(() => {
         const base = INITIAL_PROGRESS;
         return updateStep(
@@ -611,6 +634,7 @@ export default function SketchToStep() {
           ],
         };
         setDrawing(synthDrawing);
+        setPerforatedMode(true);
         setResults({
           0: {
             mesh: out.mesh,
@@ -801,6 +825,7 @@ export default function SketchToStep() {
     phase === "analyzing" || phase === "building";
   const showEditor =
     drawing &&
+    !perforatedMode &&
     (phase === "awaiting_review" ||
       phase === "ready" ||
       phase === "building");
@@ -827,6 +852,7 @@ export default function SketchToStep() {
     setSelected(0);
     setError(null);
     setPhase("idle");
+    setPerforatedMode(false);
     setProgress(INITIAL_PROGRESS);
     setUploaded((prev) => {
       if (prev) URL.revokeObjectURL(prev.url);
